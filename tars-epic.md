@@ -22,8 +22,8 @@ Resolved once here (via the epic-scope design panel: reuse-first spine + clean-s
 
 ## Phases
 
-1. **Browse the map** ◀ — builds `map-bootstrap`, `destination-catalog`, `floor-rendering`, `map-labels`, `floor-switching`, `destination-search`, `destination-focus`
-2. **Wayfinding** ○ — builds `navmesh-routing`, `route-preferences`, `route-rendering`, `route-markers`, `search-to-route`, `unroutable-level-handling`
+1. **Browse the map** ✓ — builds `map-bootstrap`, `destination-catalog`, `floor-rendering`, `map-labels`, `floor-switching`, `destination-search`, `destination-focus`
+2. **Wayfinding** ◀ — builds `navmesh-routing`, `route-preferences`, `route-rendering`, `route-markers`, `search-to-route`, `unroutable-level-handling`
 3. **Kiosk & share** ○ — builds `kiosk-here`, `deep-link-state`, `qr-share`, `brand-theming`
 
 ## Dependency tree
@@ -53,4 +53,4 @@ map-bootstrap                         (fork shell + single-bundle load + index +
 
 ## Current phase
 
-**Browse the map** — this cycle's `tars-plan.md` targets it. `/tars:cleanup` advances this marker when the phase ships.
+**Wayfinding** (Phase 2) — Phase 1 *Browse the map* shipped (7/7 green, 0 blocked) and is now in git history. The next `/tars:plan` targets Phase 2; `/tars:cleanup` advances this marker when that phase ships.

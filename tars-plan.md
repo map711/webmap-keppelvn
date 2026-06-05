@@ -31,13 +31,13 @@
 
 ## Capability breakdown
 
-- [ ] `map-bootstrap` — fork the Canvas-2D shell into this repo; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test/lint + dev server on :5080 · depends on: none
-- [ ] `destination-catalog` — `LocationStore` builds the searchable/routable destination catalog: one `shop:<id>` Location **per placed (tenancy-referenced) shop** (multi-unit aware; a multi-tenant unit yields one Location per tenancy → `getLocationsByUnitId` is one-to-many), one `unit:<id>` per routable facility unit; connectors and unplaced shops excluded · depends on: `map-bootstrap`
-- [ ] `floor-rendering` `(ui)` — unit-aware `FloorLayer` draws each active-level unit polygon with its resolved `unit→layer→kind` style; per-level visibility (an empty level draws nothing without error); fit-to-bounds with a fallback for meshless/empty levels; polygon `hitTest`→`unitId` · depends on: `map-bootstrap`
-- [ ] `map-labels` `(ui)` — `LocationLayer` renders labels for labelable units at `label_point`/`label_rotation` with `_fitScale` shrink-to-polygon + screen-rect overlap suppression · depends on: `floor-rendering`, `destination-catalog`
-- [ ] `floor-switching` `(ui)` — level selector lists the 5 levels in `position` order; `setFloor(code)` swaps the active level's geometry+labels and refits; emits `floor-changed` · depends on: `floor-rendering`
-- [ ] `destination-search` `(ui)` — search filters the catalog by title/`search_tokens`; results dropdown + info card (title, venue, logo, description) · depends on: `destination-catalog`, `map-labels`
-- [ ] `destination-focus` `(ui)` — `focusLocation(id)` and tapping a shop polygon both resolve to a Location, switch floor if needed, zoom in, and drop an end pin; clearing returns to browse · depends on: `destination-search`, `floor-rendering`
+- [x] `map-bootstrap` — fork the Canvas-2D shell into this repo; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test/lint + dev server on :5080 · depends on: none
+- [x] `destination-catalog` — `LocationStore` builds the searchable/routable destination catalog: one `shop:<id>` Location **per placed (tenancy-referenced) shop** (multi-unit aware; a multi-tenant unit yields one Location per tenancy → `getLocationsByUnitId` is one-to-many), one `unit:<id>` per routable facility unit; connectors and unplaced shops excluded · depends on: `map-bootstrap`
+- [x] `floor-rendering` `(ui)` — unit-aware `FloorLayer` draws each active-level unit polygon with its resolved `unit→layer→kind` style; per-level visibility (an empty level draws nothing without error); fit-to-bounds with a fallback for meshless/empty levels; polygon `hitTest`→`unitId` · depends on: `map-bootstrap`
+- [x] `map-labels` `(ui)` — `LocationLayer` renders labels for labelable units at `label_point`/`label_rotation` with `_fitScale` shrink-to-polygon + screen-rect overlap suppression · depends on: `floor-rendering`, `destination-catalog`
+- [x] `floor-switching` `(ui)` — level selector lists the 5 levels in `position` order; `setFloor(code)` swaps the active level's geometry+labels and refits; emits `floor-changed` · depends on: `floor-rendering`
+- [x] `destination-search` `(ui)` — search filters the catalog by title/`search_tokens`; results dropdown + info card (title, venue, logo, description) · depends on: `destination-catalog`, `map-labels`
+- [x] `destination-focus` `(ui)` — `focusLocation(id)` and tapping a shop polygon both resolve to a Location, switch floor if needed, zoom in, and drop an end pin; clearing returns to browse · depends on: `destination-search`, `floor-rendering`
 
 ## How to test           (the binding acceptance criteria)
 
