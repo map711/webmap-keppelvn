@@ -80,6 +80,7 @@ Routing/wayfinding is Phase 2.
 | `src/component/` | `<wayfinder-map>` Web Component + built-in UI controls | `WayfinderMap.js` |
 | `src/navigation/` | **Phase-2** routing (carried-over shell, not yet rebuilt) | `PathFinder.js`, `RouteManager.js` |
 | `test/` | Vitest node-env suite + `fixtures/SGC_v001.json` real bundle | per-capability `*.test.js` |
+| `demo/` | Static showcase pages for the Phase-1 browse capabilities (bare / default-controls / `focus-shop-id` / theme) + per-demo guide | `index.html` |
 
 ## Key patterns
 

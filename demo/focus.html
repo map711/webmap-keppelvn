@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Saigon Centre — Focus a Shop</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+    wayfinder-map { display: block; width: 100vw; height: 100vh; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "qrcode-generator": "../qa-shims/qrcode-generator.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- focus-shop-id auto-focuses a shop at startup: switch to its floor, zoom in,
+       and drop an end pin. Shop 10 is Starbucks (unit 108, L3). This is the
+       declarative front door to the shipped focusLocation('shop:<id>') path. -->
+  <wayfinder-map
+    data-url="../datas/SGC_v001.json"
+    default-floor="L3"
+    level-selector
+    search-control
+    enable-rotation
+    focus-shop-id="10"
+  ></wayfinder-map>
+
+  <script type="module">
+    import "../dist/wayfinder-map.esm.js";
+
+    const map = document.querySelector("wayfinder-map");
+    map.addEventListener("error", (event) => {
+      console.error("Map error:", event.detail?.error || event);
+    });
+  </script>
+</body>
+</html>
