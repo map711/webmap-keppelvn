@@ -64,6 +64,7 @@ class WayfinderMapElement extends HTMLElement {
       'default-floor',
       'you-are-here-node-id',
       'focus-node-id',
+      'focus-shop-id',
       'route-mode',
       'render-scale',
       'desktop-render-scale',
@@ -305,6 +306,12 @@ class WayfinderMapElement extends HTMLElement {
         }
         break;
 
+      case 'focus-shop-id':
+        if (this.#engine?.isInitialized) {
+          this.#applyInitialFocusShop(true);
+        }
+        break;
+
       case 'show-fps':
       case 'disable-rotation':
       case 'enable-rotation':
@@ -400,6 +407,7 @@ class WayfinderMapElement extends HTMLElement {
       this.#syncSearchControl();
       this.#applyMarkerStyleFromAttributes();
       this.#applyInitialFocusNode();
+      this.#applyInitialFocusShop();
       this.#restoreShareStateFromUrl();
 
       this.#dispatchEvent('ready', {});
@@ -1628,6 +1636,28 @@ class WayfinderMapElement extends HTMLElement {
     const focusNodeId = this.#getNumberAttr('focus-node-id');
     if (!Number.isFinite(focusNodeId) || !this.#engine?.isInitialized) return;
     const result = this.#engine.focusNode(Math.trunc(focusNodeId), { animate, duration: 900 });
+    if (result?.success) {
+      this.#focusedLocationId = result.location?.id ?? null;
+      this.#focusedNode = result.node ?? null;
+      this.#setMapMode('focus');
+    }
+  }
+
+  /**
+   * Declarative startup focus on a shop by id (`focus-shop-id` attribute).
+   * The Phase-1-honest sibling of `#applyInitialFocusNode`: resolves the shop's
+   * catalog Location (`shop:<id>`) and delegates to the shipped focus path
+   * (`MapEngine.focusLocation`). Unlike `focus-node-id` (graph node, Phase-2),
+   * this works against the published bundle, which carries no flat node graph.
+   * @param {boolean} [animate=true]
+   */
+  #applyInitialFocusShop(animate = true) {
+    const focusShopId = this.#getNumberAttr('focus-shop-id');
+    if (!Number.isFinite(focusShopId) || !this.#engine?.isInitialized) return;
+    const result = this.#engine.focusLocation(`shop:${Math.trunc(focusShopId)}`, {
+      animate,
+      duration: 900
+    });
     if (result?.success) {
       this.#focusedLocationId = result.location?.id ?? null;
       this.#focusedNode = result.node ?? null;

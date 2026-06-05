@@ -21,6 +21,13 @@ map": every other capability feeds into it.
 - Cross-floor focus switches the floor first. For a multi-unit shop, focus
   targets the unit on the current floor when present, else the shop's first
   unit/floor (`#pickLocationNode` chooses the on-current-floor candidate).
+- A host page can focus a shop **declaratively** at startup via the
+  `focus-shop-id` attribute on `<wayfinder-map>`: on `ready` (and on later
+  attribute change) the component resolves `shop:<id>` and delegates to the same
+  `focusLocation` path, then enters `focus` map mode. This is the bundle-honest
+  sibling of `focus-node-id` — `focus-node-id` targets a flat graph node (Phase-2
+  routing), which the published bundle does not carry, whereas `focus-shop-id`
+  works against the Phase-1 catalog.
 - `clearRoute()` (return to browse) removes the pin and restores browse mode.
 
 ## Interfaces & contracts
@@ -30,6 +37,10 @@ map": every other capability feeds into it.
 - `MapEngine.focusNode(nodeId, opts?)` — resolves the node's parent Location and
   delegates to `focusLocation`.
 - `MapEngine.clearRoute()` — removes the pin, restores browse.
+- Attribute `focus-shop-id="<n>"` on `<wayfinder-map>` — declarative startup
+  focus; `#applyInitialFocusShop(animate=true)` resolves `shop:<n>` and calls
+  `focusLocation(..., {animate, duration:900})`, setting `focus` map mode on
+  success. Observed in `attributeChangedCallback` so it re-applies on change.
 - Bus `tap:location` → DOM `location-tap`; bus `tap:disambiguate` → DOM
   `location-disambiguate` (both via the component's `#wireEvents` re-emit map).
 - Pin drawn by `PinMarkerLayer` (end marker) at the resolved `displayNode` point.
