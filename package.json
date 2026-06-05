@@ -1,0 +1,35 @@
+{
+  "name": "wayfinder-map-keppelvn",
+  "version": "0.0.0",
+  "description": "Wayfinder map engine for Keppel VN (Saigon Centre)",
+  "type": "module",
+  "main": "dist/wayfinder-map.umd.js",
+  "module": "dist/wayfinder-map.esm.js",
+  "exports": {
+    ".": {
+      "import": "./dist/wayfinder-map.esm.js",
+      "require": "./dist/wayfinder-map.umd.js"
+    }
+  },
+  "scripts": {
+    "build": "rollup -c",
+    "dev:watch": "rollup -c -w",
+    "dev:serve": "http-server -c-1 -p 5080",
+    "dev": "concurrently \"npm:dev:watch\" \"npm:dev:serve\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.3.1",
+    "@rollup/plugin-terser": "^0.4.4",
+    "concurrently": "^8.2.2",
+    "eslint": "^9.19.0",
+    "http-server": "^14.1.1",
+    "rollup": "^4.9.6",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "rbush": "^3.0.1"
+  }
+}

@@ -1,0 +1,8 @@
+# Dependencies
+node_modules/
+
+# Build output (reproducible via `npm run build`)
+dist/
+
+# QA verification scratch (browser screenshots from /tars:run)
+.qa-*.png

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Saigon Centre — Wayfinder Map</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #fff; }
+    wayfinder-map { display: block; width: 100vw; height: 100vh; }
+  </style>
+  <!-- Dev import map: serve the unbundled src/ directly (no build step needed for local browsing).
+       Mirrors qa-harness.html. For a production page, load dist/wayfinder-map.esm.js instead. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "qrcode-generator": "./qa-shims/qrcode-generator.js",
+      "rbush/index.js": "./node_modules/rbush/index.js",
+      "rbush": "./node_modules/rbush/index.js",
+      "quickselect": "./node_modules/quickselect/index.js"
+    }
+  }
+  </script>
+  <script type="module">
+    import './src/index.js';
+    const el = document.createElement('wayfinder-map');
+    el.setAttribute('data-url', './datas/SGC_v001.json');
+    el.setAttribute('default-floor', 'L3');
+    document.body.appendChild(el);
+  </script>
+</head>
+<body></body>
+</html>
