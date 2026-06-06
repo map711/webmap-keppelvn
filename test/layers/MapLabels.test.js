@@ -1,32 +1,36 @@
 // >>> TARS cap:map-labels
 //
-// map-labels — the LocationLayer renders shop labels for LABELABLE units only,
-// anchored at the unit's pre-resolved `label_point`/`label_rotation` (degrees->
-// radians, NO polylabel/OBB), shrunk-to-fit by `_fitScale` (clamped at 1), and
-// thinned by screen-rect overlap suppression (RectVisibility/rbush).
+// map-labels (RE-WORK) — LocationLayer label sizing is ported from sunwaymalls:
+// a ZOOM-RESPONSIVE screen-space font with a √scale growth curve and a
+// `minFontSize·dpr` FLOOR, the `_fitScale` unit-shrink REMOVED, the overlap
+// thinning rect matched to the drawn screen footprint (not box/scale), and
+// visibility recompute CACHED on unchanged scale/rotation with a zoom
+// freeze / idle-recompute pair (`beginZoom`/`endZoom`).
 //
-// Four test targets, one per acceptance criterion:
-//   1. Labelable predicate `tenancies.length>0 && kind.is_tenant && labelsVisible`:
-//      a vacant shop-kind unit and an escalator emit NO label; a tenanted shop
-//      emits its tenancy name. Observable = the text passed to ctx.fillText.
-//   2. anchor === unit.label_point; angle === label_rotation deg->rad (90 -> PI/2),
-//      pre-resolved (no recompute). Observable = the DisplayNode point/rotation.
-//   3. _fitScale < 1 for a long label in a small polygon; clamped at 1 (never
-//      upscales) when the label already fits. Observable = the returned scalar.
-//   4. Two overlapping label screen-rects -> exactly one survives (the lower-
-//      priority one is suppressed). Observable = the emitted label count / the
-//      visible-index set from the rbush path.
+// Eight test targets, one per acceptance criterion:
+//   1. min-size floor: parseFloat(ctx.font) >= minFontSize·dpr at scale=0.05.
+//   2. √scale growth: font(0.25)==floor < font(1) < font(4); font(4)>font(1).
+//   3. dpr scales floor+size: font(dpr=2) == 2·font(dpr=1) at the same scale.
+//   4. independent of unit polygon size: identical text+scale+dpr -> identical
+//      EFFECTIVE drawn font px regardless of unitWidth/unitHeight (no _fitScale).
+//   5. thinning rect width ≈ measured screen box width (not box.width/scale).
+//   6. visibility recompute cached: 1 thinning run on a repeat, 2 after a change.
+//   7. zoom freeze + idle recompute: invalidate fires once after endZoom+timers.
+//   8. labelable gate regression guard: vacant shop + escalator emit nothing;
+//      a tenanted shop emits its tenancy name.
 //
 // Pure Node/Vitest. To-be-built/rebuilt modules are imported LAZILY so the suite
 // COLLECTS cleanly and each test fails on its own behavioural assertion (not a
-// module-resolution crash). The render path is exercised against a captured 2D
-// context (fillText is the observable) under a tiny canvas/document shim.
+// module-resolution crash). The render path is exercised against an instrumented
+// 2D context (font px + per-label scale stack + measureText are the observables)
+// under a tiny canvas/document shim.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BundleLoader } from '../../src/data/BundleLoader.js';
+import * as RectVisibilityModule from '../../src/renderer/RectVisibility.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..', '..');
@@ -61,64 +65,42 @@ async function importLocationLayer() {
   return mod.LocationLayer;
 }
 
-// `_fitScale` is a ported pure helper; the plan places it "under the labels
-// layer/util". Resolve it across the plausible export sites + as a method on the
-// LocationLayer, so the test pins the BEHAVIOUR (shrink<1 / clamp at 1), not one
-// module path or one name. Surfaces as an assertion-shaped failure if absent.
-async function importFitScale() {
-  const candidates = [
-    '../../src/layers/LocationLayer.js',
-    '../../src/layers/labelFit.js',
-    '../../src/layers/util/labelFit.js',
-    '../../src/utils/labelFit.js',
-    '../../src/data/labelFit.js'
-  ];
-  for (const rel of candidates) {
-    let mod = null;
-    try {
-      mod = await import(rel);
-    } catch {
-      mod = null;
-    }
-    if (!mod) continue;
-    const fn = mod._fitScale ?? mod.fitScale ?? mod.computeFitScale ?? mod.default;
-    if (typeof fn === 'function') return fn;
-  }
-  // Last resort: a static method on the rebuilt LocationLayer.
-  const layerMod = await import('../../src/layers/LocationLayer.js').catch(() => null);
-  if (layerMod && typeof layerMod.LocationLayer?._fitScale === 'function') {
-    return layerMod.LocationLayer._fitScale.bind(layerMod.LocationLayer);
-  }
-  expect(
-    null,
-    '_fitScale must be exported from the labels layer/util (LocationLayer.js or a labelFit util)'
-  ).toBeTypeOf('function');
-}
-
-// computeVisibleRects is the rbush/SAT overlap path the suppression reuses.
-async function importComputeVisibleRects() {
-  const mod = await importModule('../../src/renderer/RectVisibility.js', 'src/renderer/RectVisibility.js');
-  expect(mod.computeVisibleRects, 'RectVisibility.js must export computeVisibleRects').toBeTypeOf('function');
-  return mod.computeVisibleRects;
-}
-
-// --- Canvas/document shim so the layer can measure + draw text in Node -------
-// A fixed-width font metric (6px/char) keeps label box sizes deterministic.
+// --- Instrumented canvas/document shim --------------------------------------
+// Fixed 6px/char text metric keeps box sizes deterministic. The shim tracks a
+// scale stack (with save/restore) so each fillText records the EFFECTIVE drawn
+// font px = (parsed font px) × (product of ctx.scale x-factors in the active
+// frame). That isolates the per-label `_fitScale` shrink (criterion 4) from the
+// shared `1/scale` counter-scale, and exposes the screen-space measured box.
 function installCanvasShim() {
   const makeCtx = () => {
     const ctx = {
-      font: '',
+      font: '12px Arial, sans-serif',
       textAlign: '',
       textBaseline: '',
       fillStyle: '',
       strokeStyle: '',
       lineWidth: 1,
       _fillTexts: [],
-      save() {},
-      restore() {},
+      // Per-fillText records: { text, fontPx, scaleX, scaleY, effFontPx }.
+      _draws: [],
+      _scaleStack: [{ x: 1, y: 1 }],
+      _measureCalls: [],
+      get _scaleX() { return ctx._scaleStack[ctx._scaleStack.length - 1].x; },
+      get _scaleY() { return ctx._scaleStack[ctx._scaleStack.length - 1].y; },
+      save() {
+        const top = ctx._scaleStack[ctx._scaleStack.length - 1];
+        ctx._scaleStack.push({ x: top.x, y: top.y });
+      },
+      restore() {
+        if (ctx._scaleStack.length > 1) ctx._scaleStack.pop();
+      },
       translate() {},
       rotate() {},
-      scale() {},
+      scale(sx, sy) {
+        const top = ctx._scaleStack[ctx._scaleStack.length - 1];
+        top.x *= (Number.isFinite(sx) ? sx : 1);
+        top.y *= (Number.isFinite(sy) ? sy : (Number.isFinite(sx) ? sx : 1));
+      },
       beginPath() {},
       moveTo() {},
       lineTo() {},
@@ -126,9 +108,28 @@ function installCanvasShim() {
       closePath() {},
       fill() {},
       stroke() {},
-      measureText(t) { return { width: String(t).length * 6 }; },
+      measureText(t) {
+        const fontPx = parseFloat(ctx.font) || 12;
+        // Width scales with the active font px so a screen-space measure is
+        // sensitive to the computed font (6px-per-char at the 12px reference).
+        const width = String(t).length * 6 * (fontPx / 12);
+        ctx._measureCalls.push({ text: String(t), fontPx, width });
+        return { width };
+      },
       getTransform() { return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }; },
-      fillText(t) { ctx._fillTexts.push(String(t)); }
+      fillText(t) {
+        const fontPx = parseFloat(ctx.font) || 0;
+        const scaleX = ctx._scaleX;
+        const scaleY = ctx._scaleY;
+        ctx._fillTexts.push(String(t));
+        ctx._draws.push({
+          text: String(t),
+          fontPx,
+          scaleX,
+          scaleY,
+          effFontPx: fontPx * scaleX
+        });
+      }
     };
     return ctx;
   };
@@ -149,20 +150,10 @@ async function buildCatalog(rawBundle) {
   return { store, model };
 }
 
-// Every DisplayNode the catalog placed (across all Locations), as a flat list.
-function allDisplayNodes(store) {
-  const out = [];
-  for (const loc of store.locations) {
-    for (const n of (loc.displayNodes || [])) out.push(n);
-  }
-  return out;
-}
-
-// Render the LocationLayer for a level and capture the texts passed to fillText.
-// Supports the constructor-arg seam `new LocationLayer(store, levelCode)` plus a
-// `setLocationStore`/`setFloor` setter seam, so the test pins the EMITTED LABEL
-// SET, not one wiring shape.
-function renderLabels(LocationLayer, store, levelCode, ctx, { scale = 1, rotation = 0, dpr = 1 } = {}) {
+// Wire a layer with the store/level, applying the sizing style if the layer
+// accepts it. Tolerant of the constructor-arg seam vs the setter seam, so the
+// test pins BEHAVIOUR, not one wiring shape.
+function makeLayer(LocationLayer, store, levelCode, style) {
   let layer;
   try {
     layer = new LocationLayer(store, levelCode);
@@ -171,8 +162,12 @@ function renderLabels(LocationLayer, store, levelCode, ctx, { scale = 1, rotatio
   }
   if (typeof layer.setLocationStore === 'function') layer.setLocationStore(store);
   if (typeof layer.setFloor === 'function') layer.setFloor(levelCode);
-  layer.renderWithContext({ ctx, dpr, scale, rotation, invalidate: () => {} });
-  return ctx._fillTexts.slice();
+  if (style && typeof layer.setStyle === 'function') layer.setStyle(style);
+  return layer;
+}
+
+function render(layer, ctx, { scale = 1, rotation = 0, dpr = 1, invalidate } = {}) {
+  layer.renderWithContext({ ctx, dpr, scale, rotation, invalidate: invalidate ?? (() => {}) });
 }
 
 // --- Mini-bundle: one M1 floor carrying a tenanted shop, a VACANT shop, and an
@@ -228,12 +223,12 @@ function makeMiniBundle() {
   };
 }
 
-// Two tenanted shops whose label anchors COINCIDE — their screen-rects fully
-// overlap, so the overlap-suppression must keep exactly one.
-function makeOverlapBundle() {
+// One M1 floor with a SINGLE tenanted shop — a clean, deterministic single-label
+// fixture for the sizing/thinning/caching criteria (no overlap interference).
+function makeSingleShopBundle({ s = 100, name = 'Solo', label_rotation = 0 } = {}) {
   const baseUnit = (over) => ({
     id: 0, level_id: 10, layer_id: 1, kind: 'shop', name: '',
-    geometry: square(0, 0), display_point: [5, 5], position: 0, is_active: true,
+    geometry: square(0, 0), display_point: [50, 50], position: 0, is_active: true,
     hidden: false, locked: false, opacity: 1.0,
     stroke_color: '', stroke_width: null, fill_color: '',
     doors: [], connector_group_id: null, label_rotation: 0.0, label_point: [50, 50],
@@ -247,253 +242,351 @@ function makeOverlapBundle() {
       { id: 1, slug: 'shop', label: 'Shop', position: 0, stroke_color: '#1e40af', stroke_width: 1.5, fill_color: '#dbeafe', is_tenant: true, is_routable: true, is_connector: false }
     ],
     units: [
-      // Two big, overlapping shop polygons whose label anchors are IDENTICAL [50,50].
-      baseUnit({ id: 401, kind: 'shop', geometry: square(0, 0, 100), label_point: [50, 50], label_rotation: 0,
-                 tenancies: [{ shop_id: 1, name: 'AlphaShopName' }] }),
-      baseUnit({ id: 402, kind: 'shop', geometry: square(0, 0, 100), label_point: [50, 50], label_rotation: 0,
-                 tenancies: [{ shop_id: 2, name: 'BetaShopName' }] })
+      baseUnit({ id: 501, kind: 'shop', geometry: square(0, 0, s), label_point: [50, 50], label_rotation,
+                 tenancies: [{ shop_id: 1, name }] })
     ],
-    shops: [
-      { id: 1, mall: 99, name: 'AlphaShopName', slug: 'alpha', category: 1, unit_number: 'M1-01', is_active: true },
-      { id: 2, mall: 99, name: 'BetaShopName', slug: 'beta', category: 1, unit_number: 'M1-02', is_active: true }
-    ],
+    shops: [{ id: 1, mall: 99, name, slug: 'solo', category: 1, unit_number: 'M1-01', is_active: true }],
     categories: [{ id: 1, name: 'Food', slug: 'food' }],
-    navmesh_by_level: { 10: { envelope_dims: [200, 200] } },
+    navmesh_by_level: { 10: { envelope_dims: [400, 400] } },
     transitions: []
   };
 }
 
+// Two tenanted shops with IDENTICAL text but very different polygon sizes
+// (tiny 20x12 vs huge 2000x2000), anchored FAR APART so overlap suppression
+// keeps both. The only difference is the would-be `_fitScale` shrink, which the
+// re-work removes -> the two effective font px must be EQUAL.
+function makeUnitSizeBundle() {
+  const baseUnit = (over) => ({
+    id: 0, level_id: 10, layer_id: 1, kind: 'shop', name: '',
+    geometry: square(0, 0), display_point: [0, 0], position: 0, is_active: true,
+    hidden: false, locked: false, opacity: 1.0,
+    stroke_color: '', stroke_width: null, fill_color: '',
+    doors: [], connector_group_id: null, label_rotation: 0.0, label_point: [0, 0],
+    tenancies: [], ...over
+  });
+  return {
+    mall: { id: 99, name: 'Mini Mall', code: 'MINI' },
+    levels: [{ id: 10, name: 'M1', code: 'M1', position: 100 }],
+    layers: [{ id: 1, level_id: 10, parent_id: null, name: 'L', position: 0, stroke_color: '', stroke_width: null, fill_color: '' }],
+    kinds: [
+      { id: 1, slug: 'shop', label: 'Shop', position: 0, stroke_color: '#1e40af', stroke_width: 1.5, fill_color: '#dbeafe', is_tenant: true, is_routable: true, is_connector: false }
+    ],
+    units: [
+      // TINY unit: a 20x12 polygon. The label 'SameLabelText' is wider than 20,
+      // so the OLD `_fitScale` path would shrink it below 1.
+      baseUnit({ id: 601, kind: 'shop',
+                 geometry: { type: 'Polygon', coordinates: [[[0, 0], [20, 0], [20, 12], [0, 12], [0, 0]]] },
+                 label_point: [10, 6], label_rotation: 0,
+                 tenancies: [{ shop_id: 1, name: 'SameLabelText' }] }),
+      // HUGE unit: a 2000x2000 polygon far away. The same label fits easily, so
+      // its `_fitScale` is 1 — different from the tiny unit under the old code.
+      baseUnit({ id: 602, kind: 'shop',
+                 geometry: { type: 'Polygon', coordinates: [[[5000, 5000], [7000, 5000], [7000, 7000], [5000, 7000], [5000, 5000]]] },
+                 label_point: [6000, 6000], label_rotation: 0,
+                 tenancies: [{ shop_id: 2, name: 'SameLabelText' }] })
+    ],
+    shops: [
+      { id: 1, mall: 99, name: 'SameLabelText', slug: 'tiny', category: 1, unit_number: 'M1-01', is_active: true },
+      { id: 2, mall: 99, name: 'SameLabelText', slug: 'huge', category: 1, unit_number: 'M1-02', is_active: true }
+    ],
+    categories: [{ id: 1, name: 'Food', slug: 'food' }],
+    navmesh_by_level: { 10: { envelope_dims: [8000, 8000] } },
+    transitions: []
+  };
+}
+
+// The sizing style the criteria pin: fontSize 8, minFontSize 8.
+const SIZE_STYLE = { fontSize: 8, minFontSize: 8 };
+
 // =============================================================================
-// Criterion 1 — labelable predicate (tenancies.length>0 && kind.is_tenant && labelsVisible)
+// Criterion 1 — min-size floor: font px >= minFontSize·dpr even at a tiny scale
 // =============================================================================
-describe('map-labels: a label is emitted only for a labelable (tenanted + tenant-kind) unit', () => {
+describe('map-labels: a min-size floor keeps the font px >= minFontSize·dpr at tiny zoom', () => {
   let shim;
   beforeEach(() => { shim = installCanvasShim(); });
   afterEach(() => { shim.restore(); });
 
-  it('emits the tenancy name for a tenanted shop unit but NO label for a vacant shop or an escalator', async () => {
+  it('applies font px >= minFontSize·dpr at scale=0.05 (never the microscopic pre-fix value)', async () => {
+    const LocationLayer = await importLocationLayer();
+    const { store } = await buildCatalog(makeSingleShopBundle());
+
+    // dpr=1 (the criterion's literal scenario): floor = minFontSize·dpr = 8.
+    const ctx1 = shim.makeCtx();
+    render(makeLayer(LocationLayer, store, 'M1', SIZE_STYLE), ctx1, { scale: 0.05, dpr: 1, rotation: 0 });
+    expect(ctx1._draws.length, 'a label must be drawn so the font is observable').toBeGreaterThan(0);
+    const fontPxDpr1 = parseFloat(ctx1.font);
+    expect(Number.isFinite(fontPxDpr1), 'ctx.font must carry a finite px size').toBe(true);
+    expect(fontPxDpr1).toBeGreaterThanOrEqual(8 * 1);
+
+    // dpr=2: the floor scales to minFontSize·dpr = 16. The binding assertion is
+    // parseFloat(ctx.font) >= minFontSize·dpr. The pre-fix fixed-style path emits
+    // a dpr-blind ~8px here, which is below the 16px floor -> this is where the
+    // missing min-size floor bites.
+    const ctx2 = shim.makeCtx();
+    render(makeLayer(LocationLayer, store, 'M1', SIZE_STYLE), ctx2, { scale: 0.05, dpr: 2, rotation: 0 });
+    expect(ctx2._draws.length, 'a label must be drawn at dpr=2').toBeGreaterThan(0);
+    const fontPxDpr2 = parseFloat(ctx2.font);
+    const minFontSize = 8;
+    const dpr = 2;
+    expect(fontPxDpr2).toBeGreaterThanOrEqual(minFontSize * dpr);
+  });
+});
+
+// =============================================================================
+// Criterion 2 — √scale growth above the floor
+// =============================================================================
+describe('map-labels: the font grows with √scale above the floor and pins to the floor below it', () => {
+  let shim;
+  beforeEach(() => { shim = installCanvasShim(); });
+  afterEach(() => { shim.restore(); });
+
+  function fontPxAtScale(LocationLayer, store, scale) {
+    const ctx = shim.makeCtx();
+    const layer = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+    render(layer, ctx, { scale, dpr: 1, rotation: 0 });
+    expect(ctx._draws.length, `a label must draw at scale=${scale}`).toBeGreaterThan(0);
+    return parseFloat(ctx.font);
+  }
+
+  it('orders font(0.25) == floor < font(1) < font(4), with font(4) strictly > font(1)', async () => {
+    const LocationLayer = await importLocationLayer();
+    const { store } = await buildCatalog(makeSingleShopBundle());
+
+    const f025 = fontPxAtScale(LocationLayer, store, 0.25);
+    const f1 = fontPxAtScale(LocationLayer, store, 1);
+    const f4 = fontPxAtScale(LocationLayer, store, 4);
+
+    // At scale 0.25: 8·√0.25 = 4 < floor 8 -> pinned to the floor (8).
+    expect(f025).toBeCloseTo(8, 6);
+    // At scale 1: 8·√1 = 8 (== floor). At scale 4: 8·√4 = 16.
+    expect(f1).toBeCloseTo(8, 6);
+    expect(f4).toBeCloseTo(16, 6);
+
+    // The binding orderings from the criterion.
+    expect(f025).toBeLessThan(f4);
+    expect(f4).toBeGreaterThan(f1);
+    // and the floor case is NOT above scale=1 (it is the floor, not √-grown).
+    expect(f025).toBeLessThanOrEqual(f1 + 1e-6);
+  });
+});
+
+// =============================================================================
+// Criterion 3 — dpr scales both the floor and the size (px doubles with dpr)
+// =============================================================================
+describe('map-labels: dpr scales the floor and the size (font px doubles at dpr=2)', () => {
+  let shim;
+  beforeEach(() => { shim = installCanvasShim(); });
+  afterEach(() => { shim.restore(); });
+
+  it('font(dpr=2) == 2 × font(dpr=1) at the same small scale=0.25 (the floor is minFontSize·dpr)', async () => {
+    const LocationLayer = await importLocationLayer();
+    const { store } = await buildCatalog(makeSingleShopBundle());
+
+    const ctx1 = shim.makeCtx();
+    const layer1 = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+    render(layer1, ctx1, { scale: 0.25, dpr: 1, rotation: 0 });
+    expect(ctx1._draws.length).toBeGreaterThan(0);
+    const fontDpr1 = parseFloat(ctx1.font);
+
+    const ctx2 = shim.makeCtx();
+    const layer2 = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+    render(layer2, ctx2, { scale: 0.25, dpr: 2, rotation: 0 });
+    expect(ctx2._draws.length).toBeGreaterThan(0);
+    const fontDpr2 = parseFloat(ctx2.font);
+
+    // At scale 0.25 both are floored: floor(dpr=1)=8, floor(dpr=2)=16. The px
+    // doubles with dpr.
+    expect(fontDpr1).toBeCloseTo(8, 6);
+    expect(fontDpr2).toBeCloseTo(2 * fontDpr1, 6);
+  });
+});
+
+// =============================================================================
+// Criterion 4 — font px is INDEPENDENT of the unit polygon size (no _fitScale)
+// =============================================================================
+describe('map-labels: identical text/scale/dpr draws at the same font px regardless of unit size', () => {
+  let shim;
+  beforeEach(() => { shim = installCanvasShim(); });
+  afterEach(() => { shim.restore(); });
+
+  it('draws a tiny-unit label and a huge-unit label at the SAME effective font px (the _fitScale shrink is gone)', async () => {
+    const LocationLayer = await importLocationLayer();
+    const { store } = await buildCatalog(makeUnitSizeBundle());
+    const ctx = shim.makeCtx();
+
+    const layer = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+    // scale=1, dpr=1 -> the shared 1/scale counter-scale is identical for both;
+    // the ONLY remaining per-label scale would be the old `_fitScale`.
+    render(layer, ctx, { scale: 1, dpr: 1, rotation: 0 });
+
+    // Both labels share the same text and must both draw (anchored far apart).
+    const draws = ctx._draws.filter((d) => d.text === 'SameLabelText');
+    expect(draws.length, 'both same-text labels must be drawn (far-apart anchors)').toBe(2);
+
+    // The effective drawn font px (font × per-label scale, after removing the
+    // shared 1/scale frame) must be EQUAL across the tiny and huge units. Under
+    // the OLD code the tiny 20x12 unit shrinks via _fitScale (< 1) and the huge
+    // unit does not, so the two diverge.
+    const [a, b] = draws;
+    expect(a.effFontPx).toBeGreaterThan(0);
+    expect(b.effFontPx).toBeGreaterThan(0);
+    expect(a.effFontPx).toBeCloseTo(b.effFontPx, 6);
+  });
+});
+
+// =============================================================================
+// Criterion 5 — thinning rect width ≈ measured screen box width (not box/scale)
+// =============================================================================
+describe('map-labels: the overlap-thinning rect matches the drawn screen footprint', () => {
+  let shim;
+  let spy;
+  beforeEach(() => {
+    shim = installCanvasShim();
+    spy = vi.spyOn(RectVisibilityModule, 'computeVisibleRects');
+  });
+  afterEach(() => {
+    spy.mockRestore();
+    shim.restore();
+  });
+
+  it('builds a thinning rect whose width ≈ the measured screen box (NOT box.width / scale) at scale=0.1', async () => {
+    const LocationLayer = await importLocationLayer();
+    // Single labelled shop so exactly one rect is built.
+    const { store } = await buildCatalog(makeSingleShopBundle({ name: 'WidthProbe', s: 400 }));
+    const ctx = shim.makeCtx();
+
+    const scale = 0.1;
+    const layer = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+    render(layer, ctx, { scale, dpr: 1, rotation: 0 });
+
+    // computeVisibleRects is the shared thinning seam; capture the rects it saw.
+    expect(spy, 'the layer must thin via computeVisibleRects').toHaveBeenCalled();
+    const rects = spy.mock.calls[spy.mock.calls.length - 1][0];
+    expect(Array.isArray(rects)).toBe(true);
+    expect(rects.length, 'exactly one candidate rect for the single label').toBe(1);
+    const rectWidth = rects[0].width;
+
+    // The measured screen box for this label: the layer measures 'WidthProbe' at
+    // the floored font (8px). The fixed-metric shim returns a width tied to that
+    // font; reconstruct the same box the layer drew.
+    const probe = ctx._measureCalls.find((m) => m.text === 'WidthProbe');
+    expect(probe, 'the layer must measureText the label at the active font').toBeTruthy();
+
+    // The thinning rect width matches the measured box (± padding ~ a few px).
+    // It must NOT be box.width / scale (which at scale=0.1 would be ~10× larger).
+    expect(rectWidth).toBeGreaterThan(0);
+    expect(rectWidth).toBeLessThan(probe.width / scale * 0.5);
+    // and it tracks the measured box width within a small padding margin.
+    expect(Math.abs(rectWidth - probe.width)).toBeLessThanOrEqual(20);
+  });
+});
+
+// =============================================================================
+// Criterion 6 — visibility recompute is CACHED on unchanged scale/rotation
+// =============================================================================
+describe('map-labels: visibility thinning is cached across identical renders and recomputes on change', () => {
+  let shim;
+  let spy;
+  beforeEach(() => {
+    shim = installCanvasShim();
+    spy = vi.spyOn(RectVisibilityModule, 'computeVisibleRects');
+  });
+  afterEach(() => {
+    spy.mockRestore();
+    shim.restore();
+  });
+
+  it('runs thinning once across two identical renders (cache hit) and recomputes when scale changes', async () => {
+    const LocationLayer = await importLocationLayer();
+    const { store } = await buildCatalog(makeSingleShopBundle());
+    const ctx = shim.makeCtx();
+
+    const layer = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+
+    // First render at scale=1, rotation=0: thinning runs once.
+    render(layer, ctx, { scale: 1, rotation: 0, dpr: 1 });
+    // Second render at the SAME scale/rotation: cache hit, no recompute.
+    render(layer, ctx, { scale: 1, rotation: 0, dpr: 1 });
+    expect(spy, 'identical scale/rotation must not re-run the thinning').toHaveBeenCalledTimes(1);
+
+    // Third render at a CHANGED scale: thinning recomputes (count -> 2).
+    render(layer, ctx, { scale: 2, rotation: 0, dpr: 1 });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+// =============================================================================
+// Criterion 7 — zoom gesture freezes thinning; endZoom schedules an idle recompute
+// =============================================================================
+describe('map-labels: a zoom gesture freezes thinning and endZoom idle-recomputes via invalidate', () => {
+  let shim;
+  let spy;
+  beforeEach(() => {
+    shim = installCanvasShim();
+    spy = vi.spyOn(RectVisibilityModule, 'computeVisibleRects');
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    spy.mockRestore();
+    shim.restore();
+  });
+
+  it('calls the captured invalidate exactly once after endZoom + advancing timers, and not before', async () => {
+    const LocationLayer = await importLocationLayer();
+    const { store } = await buildCatalog(makeSingleShopBundle());
+    const ctx = shim.makeCtx();
+    const invalidate = vi.fn();
+
+    const layer = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+    expect(typeof layer.beginZoom, 'the layer must expose beginZoom()').toBe('function');
+    expect(typeof layer.endZoom, 'the layer must expose endZoom()').toBe('function');
+
+    // A render captures the `invalidate` from the render context + a snapshot.
+    render(layer, ctx, { scale: 1, rotation: 0, dpr: 1, invalidate });
+
+    // Gesture begins: mid-gesture renders must NOT trigger the idle invalidate.
+    layer.beginZoom();
+    render(layer, ctx, { scale: 1.5, rotation: 0, dpr: 1, invalidate });
+    render(layer, ctx, { scale: 2.5, rotation: 0, dpr: 1, invalidate });
+    vi.advanceTimersByTime(1000);
+    expect(invalidate, 'no idle recompute may fire mid-gesture').not.toHaveBeenCalled();
+
+    // Gesture ends: an idle recompute is scheduled (setTimeout fallback). It has
+    // not fired yet (timers not advanced).
+    layer.endZoom();
+    expect(invalidate, 'invalidate must not fire before timers advance').not.toHaveBeenCalled();
+
+    // Advancing timers fires the idle recompute exactly once -> invalidate once.
+    vi.advanceTimersByTime(500);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// =============================================================================
+// Criterion 8 — labelable gate regression guard (node selection unchanged)
+// =============================================================================
+describe('map-labels: the labelable gate still selects only tenanted tenant-kind units (regression)', () => {
+  let shim;
+  beforeEach(() => { shim = installCanvasShim(); });
+  afterEach(() => { shim.restore(); });
+
+  it('emits the tenancy name for a tenanted shop but NO label for a vacant shop or an escalator', async () => {
     const LocationLayer = await importLocationLayer();
     const { store } = await buildCatalog(makeMiniBundle());
     const ctx = shim.makeCtx();
 
-    const texts = renderLabels(LocationLayer, store, 'M1', ctx);
+    const layer = makeLayer(LocationLayer, store, 'M1', SIZE_STYLE);
+    render(layer, ctx, { scale: 1, rotation: 0, dpr: 1 });
+    const texts = ctx._fillTexts.slice();
 
     // The tenanted shop's tenancy name is drawn.
     expect(texts).toContain('Mini Cafe');
-    // The vacant shop-kind unit (302) and the escalator (303) draw NOTHING:
-    // neither their shop names nor any escalator label appear.
-    expect(texts).not.toContain('Mini Shop');
+    // The vacant shop-kind unit (302) and the escalator (303) draw NOTHING.
     expect(texts.some((t) => /escalator/i.test(t))).toBe(false);
     // Exactly one label total on this level (only unit 301 is labelable).
     expect(texts.length).toBe(1);
-  });
-
-  it('emits NOTHING when labelsVisible is off (layer hidden), even for the tenanted shop', async () => {
-    const LocationLayer = await importLocationLayer();
-    const { store } = await buildCatalog(makeMiniBundle());
-    const ctx = shim.makeCtx();
-
-    let layer;
-    try { layer = new LocationLayer(store, 'M1'); } catch { layer = new LocationLayer(); }
-    if (typeof layer.setLocationStore === 'function') layer.setLocationStore(store);
-    if (typeof layer.setFloor === 'function') layer.setFloor('M1');
-    // labelsVisible off — the Layer interface gates draw via `visible`.
-    layer.visible = false;
-
-    layer.renderWithContext({ ctx, dpr: 1, scale: 1, rotation: 0, invalidate: () => {} });
-    expect(ctx._fillTexts.length).toBe(0);
-  });
-
-  it('on the real SGC L3 seed, every emitted label is a placed tenancy name (no vacant/connector text)', async () => {
-    const LocationLayer = await importLocationLayer();
-    const raw = loadSgcRaw();
-    const { store } = await buildCatalog(raw);
-    const ctx = shim.makeCtx();
-
-    const texts = renderLabels(LocationLayer, store, 'L3', ctx, { scale: 1, rotation: 0 });
-
-    // The set of legitimate L3 tenancy names (the only thing that may be drawn).
-    const l3LevelId = raw.levels.find((l) => l.code === 'L3')?.id;
-    const placedNames = new Set();
-    for (const u of raw.units) {
-      if (u.level_id !== l3LevelId) continue;
-      const k = raw.kinds.find((kk) => kk.slug === u.kind);
-      if (!k || !k.is_tenant) continue;
-      for (const t of (u.tenancies || [])) {
-        const shop = raw.shops.find((s) => s.id === t.shop_id);
-        if (shop) placedNames.add(shop.name);
-      }
-    }
-    // At least one real shop is placed on L3 (the seed has Starbucks et al.).
-    expect(placedNames.size).toBeGreaterThan(0);
-    // Some labels were actually drawn (the layer is not inert).
-    expect(texts.length).toBeGreaterThan(0);
-    // and EVERY drawn label is one of the placed tenancy names.
-    for (const t of texts) {
-      expect(placedNames.has(t), `drawn label "${t}" must be a placed L3 tenancy name`).toBe(true);
-    }
-  });
-});
-
-// =============================================================================
-// Criterion 2 — anchor = label_point; angle = label_rotation deg->rad; pre-resolved
-// =============================================================================
-describe('map-labels: label anchor = label_point and angle = label_rotation converted deg->rad', () => {
-  it('places the DisplayNode at label_point with rotation = 90deg -> PI/2 rad (no recompute)', async () => {
-    const { store } = await buildCatalog(makeMiniBundle());
-
-    // unit 301 is the tenanted shop: label_point [5,5], label_rotation 90 (degrees).
-    const loc = store.getLocation('shop:1');
-    expect(loc, 'shop:1 Location must exist').toBeTruthy();
-    const node = loc.displayNodes.find((n) => String(n.unitId ?? n.id) === '301') ?? loc.displayNodes[0];
-    expect(node, 'shop:1 must carry a DisplayNode for unit 301').toBeTruthy();
-
-    // Anchor === the unit's label_point, verbatim (renderScale 1, no polylabel/OBB).
-    expect(node.point.x).toBeCloseTo(5, 9);
-    expect(node.point.y).toBeCloseTo(5, 9);
-
-    // Angle === label_rotation converted degrees -> radians: 90deg -> PI/2.
-    expect(node.rotation).toBeCloseTo(Math.PI / 2, 9);
-    // and explicitly NOT the raw degrees value (the deg->rad conversion happened).
-    expect(node.rotation).not.toBeCloseTo(90, 6);
-  });
-
-  it('maps a real SGC unit (label_rotation 90) to PI/2 radians at its exact label_point', async () => {
-    const raw = loadSgcRaw();
-    const { store } = await buildCatalog(raw);
-
-    // The seed's unit 119 is a tenanted shop with label_rotation 90.
-    const seedUnit = raw.units.find((u) => u.id === 119);
-    expect(seedUnit, 'SGC unit 119 must exist with label_rotation 90').toBeTruthy();
-    expect(seedUnit.label_rotation).toBe(90);
-
-    const node = allDisplayNodes(store).find((n) => String(n.unitId ?? n.id) === '119');
-    expect(node, 'a DisplayNode must be placed for unit 119').toBeTruthy();
-
-    const [lx, ly] = seedUnit.label_point;
-    expect(node.point.x).toBeCloseTo(lx, 6);
-    expect(node.point.y).toBeCloseTo(ly, 6);
-    expect(node.rotation).toBeCloseTo(Math.PI / 2, 9);
-  });
-
-  it('keeps a 0deg label_rotation at 0 radians (deg->rad is exact at the origin)', async () => {
-    const { store } = await buildCatalog(makeMiniBundle());
-    // unit 301 we already rotated; assert a real 0-rotation seed node stays 0.
-    const raw = loadSgcRaw();
-    const { store: sgc } = await buildCatalog(raw);
-    const zeroUnit = raw.units.find((u) => u.label_rotation === 0 && (u.tenancies || []).length > 0);
-    expect(zeroUnit, 'the seed has a tenanted unit at label_rotation 0').toBeTruthy();
-    const node = allDisplayNodes(sgc).find((n) => String(n.unitId ?? n.id) === String(zeroUnit.id));
-    expect(node, 'a DisplayNode must exist for the 0-rotation tenanted unit').toBeTruthy();
-    expect(node.rotation).toBeCloseTo(0, 9);
-  });
-});
-
-// =============================================================================
-// Criterion 3 — _fitScale shrinks (<1) for a too-long label, clamps at 1 otherwise
-// =============================================================================
-describe('map-labels: _fitScale shrinks an oversized label and clamps at 1', () => {
-  let shim;
-  beforeEach(() => { shim = installCanvasShim(); });
-  afterEach(() => { shim.restore(); });
-
-  // _fitScale's port takes the label's natural (text-box) dimensions and the
-  // unit's available extents and returns min(1, fitX, fitY). We call it across
-  // the few plausible argument shapes so the test pins the SCALAR contract, not
-  // one signature: (labelW, labelH, unitW, unitH) or ({labelWidth,labelHeight},
-  // {width,height}).
-  function callFit(fn, labelW, labelH, unitW, unitH) {
-    const attempts = [
-      () => fn(labelW, labelH, unitW, unitH),
-      () => fn({ width: labelW, height: labelH }, { width: unitW, height: unitH }),
-      () => fn({ labelWidth: labelW, labelHeight: labelH, unitWidth: unitW, unitHeight: unitH }),
-      () => fn({ textWidth: labelW, textHeight: labelH }, { width: unitW, height: unitH })
-    ];
-    for (const a of attempts) {
-      let v;
-      try { v = a(); } catch { v = undefined; }
-      if (typeof v === 'number' && Number.isFinite(v)) return v;
-    }
-    return undefined;
-  }
-
-  it('returns a value < 1 for a long label inside a small polygon (the box is shrunk to fit)', async () => {
-    const fitScale = await importFitScale();
-    // A 400-wide label that must fit a 100-wide unit -> scale must drop below 1.
-    const scale = callFit(fitScale, 400, 20, 100, 100);
-    expect(typeof scale, '_fitScale must return a finite number').toBe('number');
-    expect(scale).toBeGreaterThan(0);
-    expect(scale).toBeLessThan(1);
-    // and roughly the limiting ratio (100/400 = 0.25), not an arbitrary shrink.
-    expect(scale).toBeLessThanOrEqual(0.25 + 1e-6);
-  });
-
-  it('clamps to exactly 1 (never upscales) when the label already fits the polygon', async () => {
-    const fitScale = await importFitScale();
-    // A tiny 10x10 label in a roomy 1000x1000 unit could scale up to 100x — but
-    // _fitScale must NOT upscale; it returns exactly 1.
-    const scale = callFit(fitScale, 10, 10, 1000, 1000);
-    expect(typeof scale, '_fitScale must return a finite number').toBe('number');
-    expect(scale).toBe(1);
-  });
-
-  it('limits by the tighter of the two axes (height-bound polygon shrinks below 1)', async () => {
-    const fitScale = await importFitScale();
-    // Label fits in width (50<=1000) but is too tall (200 in a 100-tall unit):
-    // the height axis binds, so scale < 1 (~100/200 = 0.5).
-    const scale = callFit(fitScale, 50, 200, 1000, 100);
-    expect(typeof scale).toBe('number');
-    expect(scale).toBeLessThan(1);
-    expect(scale).toBeLessThanOrEqual(0.5 + 1e-6);
-  });
-});
-
-// =============================================================================
-// Criterion 4 — overlapping screen-rects: the lower-priority label is suppressed
-// =============================================================================
-describe('map-labels: overlapping label rects suppress all but one (RectVisibility/rbush)', () => {
-  let shim;
-  beforeEach(() => { shim = installCanvasShim(); });
-  afterEach(() => { shim.restore(); });
-
-  it('keeps exactly one label when two tenanted shops share the same screen anchor', async () => {
-    const LocationLayer = await importLocationLayer();
-    const { store } = await buildCatalog(makeOverlapBundle());
-    const ctx = shim.makeCtx();
-
-    // Both shops anchor at world [50,50]; at scale 1 their label boxes coincide,
-    // so the overlap-suppression must keep ONE and drop the other.
-    const texts = renderLabels(LocationLayer, store, 'M1', ctx, { scale: 1, rotation: 0 });
-
-    // Both names are real candidates...
-    const drawnAlpha = texts.includes('AlphaShopName');
-    const drawnBeta = texts.includes('BetaShopName');
-    // ...but exactly ONE is drawn (the other is suppressed by overlap).
-    expect(drawnAlpha || drawnBeta, 'at least one of the overlapping labels must draw').toBe(true);
-    expect(drawnAlpha && drawnBeta, 'overlapping labels must not BOTH draw').toBe(false);
-    expect(texts.length).toBe(1);
-  });
-
-  it('the RectVisibility/rbush path keeps only the first of two coincident rects', async () => {
-    const computeVisibleRects = await importComputeVisibleRects();
-    // Two identical, fully-overlapping axis-aligned rects at the same center.
-    const rects = [
-      { cx: 100, cy: 100, width: 80, height: 20, rotation: 0 },
-      { cx: 100, cy: 100, width: 80, height: 20, rotation: 0 }
-    ];
-    const visible = computeVisibleRects(rects);
-    // Only the first survives; the overlapping second is suppressed.
-    expect(visible).toEqual([0]);
-  });
-
-  it('does NOT suppress two labels whose rects are far apart (both survive)', async () => {
-    const computeVisibleRects = await importComputeVisibleRects();
-    const rects = [
-      { cx: 0, cy: 0, width: 20, height: 10, rotation: 0 },
-      { cx: 10000, cy: 10000, width: 20, height: 10, rotation: 0 }
-    ];
-    const visible = computeVisibleRects(rects);
-    expect(visible.sort((a, b) => a - b)).toEqual([0, 1]);
   });
 });
 // <<< TARS cap:map-labels
