@@ -879,6 +879,45 @@ describe('destination-focus: tap/select a shop -> focus it (real stores + classi
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  // Regression — the DEFAULT (production) renderScale must keep the location
+  // catalog in the SAME coordinate space as the mesh. The whole suite above
+  // hydrates with renderScale:1 (the raw-coords seam) and never exercises the
+  // Config default, so a wrong default (e.g. 1500, a holdover from the forked
+  // shell's normalized coords) slipped through: it multiplied every label/pin/
+  // focus anchor by 1500 into the millions while the mesh stayed raw, so
+  // focusLocation drove the camera into empty space (floor renders blank, only
+  // the pin shows). This test boots WITHOUT a renderScale override so the
+  // production default governs.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('regression: the DEFAULT renderScale keeps the catalog in mesh coordinate space', () => {
+    it('focusLocation under default config lands inside the level mesh envelope (no coordinate blow-up)', async () => {
+      const MapEngine = await importMapEngine();
+      globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(loadSgc()));
+      // NOTE: NO renderScale here -> exercises the production Config default.
+      const engine = new MapEngine(new globalThis.HTMLCanvasElement(), {
+        dataUrl: '/datas/bundle.json'
+      });
+      await engine.init();
+
+      const result = engine.focusLocation('shop:10'); // Starbucks, L3
+      expect(result.success).toBe(true);
+
+      // L3's navmesh envelope is ~[4363.33, 4478.25] from (0,0). The focus anchor
+      // (Starbucks label_point ~[2571.46, 2725.69]) MUST land inside it. A catalog
+      // scaled by the wrong default drives it far outside (e.g. 1500x -> ~[3.86M,
+      // 4.09M]) -> the camera centers on the void and the floor renders blank.
+      const pt = result.node.point;
+      expect(pt.x).toBeGreaterThanOrEqual(0);
+      expect(pt.y).toBeGreaterThanOrEqual(0);
+      expect(pt.x).toBeLessThanOrEqual(4363.32642610794);
+      expect(pt.y).toBeLessThanOrEqual(4478.24524562068);
+      // Tightest: under the correct default the anchor is the RAW label_point.
+      expect(pt.x).toBeCloseTo(2571.4576503502817, 4);
+      expect(pt.y).toBeCloseTo(2725.6868220859096, 4);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Criterion 4 — clearRoute() removes the pin and restores browse mode.
   // ───────────────────────────────────────────────────────────────────────────
   describe('criterion 4: clearRoute() removes the pin + restores browse', () => {
