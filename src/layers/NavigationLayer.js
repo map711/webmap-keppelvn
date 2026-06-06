@@ -15,9 +15,9 @@ export class NavigationLayer extends Layer {
   #totalLength = 0;
 
   #bottomColor = '#999999';
-  #bottomWidth = 8;
+  #bottomWidth = 16;
   #topColor = '#000000';
-  #topWidth = 4;
+  #topWidth = 8;
 
   #progress = 0;
   #speed = 0.0025;

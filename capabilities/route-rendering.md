@@ -15,9 +15,10 @@ canvas draw; the engine frames the start floor on a successful navigation.
   layer draws nothing (no throw).
 - `setPath` **starts** the walk animation (`getAnimationStatus().isAnimating`
   `true`); `clearPath()` **stops** it and drops the stored result.
-- `renderWithContext` draws **two strokes** — a full grey path and a partial,
-  animated black progress stroke — from `segment[i][0]/[1]` coordinates over the
-  active floor's points.
+- `renderWithContext` draws **two strokes** — a full grey path (width 16) and a
+  partial, animated black progress stroke (width 8) — from `segment[i][0]/[1]`
+  coordinates over the active floor's points. The widths were doubled (was 8/4)
+  so the route reads clearly at the fit zoom over the busy floor fill.
 - After `engine.navigateTo` success, the engine `setFloor`s to
   `startAnchor.levelCode` and `centerOn`s `(startAnchor.x, startAnchor.y)`,
   reusing the Phase-1 focus camera path.
