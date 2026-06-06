@@ -1,128 +1,289 @@
-# Plan — Phase 1: Browse the map
-
-> Phase 1 of the **Keppel Webmap (Saigon Centre wayfinder)** epic. Inherits all cross-cutting
-> decisions from [tars-epic.md](tars-epic.md). This phase delivers a browsable SGC map (no routing
-> yet — that is Phase 2).
+# Plan — Phase 2: Wayfinding (Keppel Webmap / SGC)
 
 ## What & why            (PM ↔ client)
 
-- **Intent:** Stand up the standalone `<wayfinder-map>` app for Saigon Centre by forking the `webmap-sunwaymalls` Canvas-2D shell and feeding it the CMS bundle `datas/SGC_v001.json`. By end of phase, a visitor opening the page at **:5080** sees SGC's floors drawn from the bundle's GeoJSON units (per-unit styling from the kind→layer→unit cascade), reads shop labels, switches between the 5 floors (B2/B1/L1/L2/L3), searches shops & facilities, and taps a shop (in search or directly on its polygon) to focus it with a pin. Wayfinding/routes are explicitly out of scope this phase.
-- **Constraints:** No Konva — port the indoorcms render *logic* into the existing Canvas-2D layers. Single `data-url` (the bundle carries everything). Raw CMS coordinates, `renderScale=1`. The public component/engine API and built-in UI from the shell stay intact (so Phase 2/3 features drop in). Dev server + local run on **port 5080**. Vitest node-env; pure ports tested against a synthetic mini-bundle, the real 2 MB bundle only in one opt-in smoke test. **The SGC seed is a _sparse fixture_** — of 20 shops only **5 are placed** (4 tenanted units, all on L3), and **L1 (level 3) has no navmesh _and_ no units** — so a meshless/empty level must still be selectable and activate without error, framing via a bounds fallback (routing degradation is a Phase 2 concern). Because the seed is sparse, **real-bundle criteria assert data-driven _rules_, not seed magic-numbers** — concrete counts live in the synthetic mini-bundle (stable top-level array counts excepted).
-- **Decisions:** (inherited from the epic — see its *Cross-cutting decisions*) string-namespaced ids `shop:<id>`/`unit:<id>`; destinations = tenanted shops + routable facility units, connectors excluded; unit-aware floor layer (polygon `hitTest` → `unitId`); `_fitScale` labels ported now; level dims from `envelope_dims` with bbox fallback. **Resolved this phase against the real bundle:** (a) catalog = **placed shops only** — a shop in `shops[]` with no unit tenancy yields **no** Location; (b) a **multi-tenant unit** (one polygon, ≥2 tenancies — e.g. unit 121 = ASICS + Basta Hiro) yields **one Location per tenancy**, so `unitId → Location` is one-to-many (`getLocationsByUnitId` returns a list; a polygon tap on such a unit disambiguates rather than silently picking); (c) a meshless **and** unit-less level (L1 here) is selectable, renders empty, and `getBounds()` falls back (mesh `envelope_dims` → unit-bbox union → neutral default) without error.
+- **Intent:** Give a SGC visitor turn-by-nothing **wayfinding**: pick a *from* and a
+  *to* destination and see the shortest walking route drawn on the map — across
+  floors, hugging corners, with start/end pins and "tap to change floor" bubbles at
+  escalator/lift transitions. This is Phase 2 of the epic; Phase 1 (browse/search/
+  focus) shipped. The engine routes over the bundle's **triangle navmesh** +
+  **cross-floor transitions** (`SGC_v001.json`) — the carried-over node-graph
+  routing scaffolding is rebuilt in place to consume that navmesh.
+- **Constraints:**
+  - **Rebuild in place, no parallel files.** Keep `MapEngine`, the two-store split
+    (`LocationStore` + `MapGeometryStore`), `RouteManager`/`PathFinder`, and the
+    three route layers; replace their *internals*. No new `Navmesh*Layer`, no third
+    store, no `WayfinderEngine`.
+  - **Route result = per-floor polyline segments**, never a synthesized `Node[]`
+    (the epic explicitly rejected fake nodes). Layers consume segments + anchors +
+    transitions.
+  - **Sparse real bundle.** Only **L2 (id 4)** and **L3 (id 5)** carry real meshes;
+    B2/B1 are stubs; **L1 (id 3) has no navmesh entry at all**. There is exactly
+    **one** usable cross-floor connector — the escalator group L2↔L3 (cost 1.0,
+    `is_accessible:false`). The only *accessible* transition (the lift group) lands
+    on **meshless B1**, so it is non-navigable. ⇒ **preference + step-free semantics
+    are proven on the synthetic routing fixture; the real bundle asserts only the
+    rules** (an intra-floor L3 route exists; the L2↔L3 escalator route exists; any
+    route touching a meshless level is a structured error). [CLAUDE.md rules-vs-
+    counts split.]
+  - Canvas-2D only, raw CMS coordinates (`renderScale = 1`). Vitest node-env; pure
+    ports driven by a synthetic mini-bundle, the 2 MB bundle only in opt-in smoke
+    tests. Dev/run on port 5080. Public component/engine API stays intact.
+  - **You-are-here as a route start is OUT** (deferred to Phase 3 `kiosk-here`).
+    Phase 2 routing is **destination → destination** only.
+- **Decisions:**
+  - **True funnel (string-pull) path** — A* over triangles then funnel to the
+    shortest corner-hugging polyline. *Rejected:* centroid-hop (zig-zags through
+    triangle centers; not the indoorcms behavior).
+  - **All six capabilities this cycle** (core + ui) in one plan → run → cleanup.
+  - **Animated walk** for the drawn route (grey full path + animated black
+    progress), rebuilt over segments. *Rejected:* static-only polyline.
+  - **Soft connector preference, hard step-free gate** (inherited from the epic):
+    preferred connector kind ⇒ `transition.cost`; non-preferred ⇒ `cost + 100` (a
+    route still exists when only the non-preferred connector is available);
+    step-free ⇒ only `is_accessible` transitions, else a structured error.
+  - **Connector kind from the member unit's `kind` slug** (escalator/elevator/
+    stairs), not from `cost`. `is_accessible` comes from the transition. *Rejected:*
+    inferring kind from `cost` magic numbers (fragile).
 
 ## How                   (tech lead — grounded in the codebase)
 
 - **Module map:**
-  - **Fork unchanged** from `webmap-sunwaymalls/src/`: `core/EventBus.js`, `core/Config.js`, `core/MapEngine.js` (rebuild only `#loadData`/`#createLayers`/`#createNavigationSystem`), `renderer/*` (Renderer, TransformPipeline, LayerStack, AnimationScheduler, RectVisibility), `interaction/*` (GestureRecognizer, HitTestManager — patch `#classifyHit` for `{unitId}`), `layers/Layer.js`, `component/WayfinderMap.js` (+ `controls/`, `styles.js`), `assets/*`, `index.js`, and the build/test infra (`rollup.config.js`, `scripts/`, `vitest.config.js`, `package.json` — dev script → `-p 5080`).
-  - **Add** (new, mostly pure): `src/data/BundleLoader.js` (fetch + parse + index the single bundle), `src/data/StyleResolver.js` (`resolveStyle(unit, layersById, kindsBySlug)` cascade), and a label-fit helper (`_fitScale` port) under the labels layer/util.
-  - **Replace internals** (public contract preserved): `src/data/LocationModel.js` (`LocationStore` → Location catalog from shops+facilities), `src/data/MapGeometryModel.js` (`MapGeometryStore`/`MapLevel` → per-unit polygons + dims), `src/layers/FloorLayer.js` (unit-aware draw + `hitTest`→`unitId`), `src/layers/LocationLayer.js` (labels from `displayNodes`).
-- **Patterns:** keep the shell's seam contracts — `LocationStore`/`MapGeometryStore` public arrays/maps, the `Layer` interface (`renderWithContext`/`setFloor`/`hitTest`/`dispose`), `MapEngine` public API, `EventBus` `entity:action` events re-emitted as DOM events. Port the indoorcms pure logic verbatim where possible: `geometryToPoints` (drop the closing ring vertex), the `resolveStyle` cascade (`unit || layer || kind || default`; `""`/`null` = inherit), label anchor = `label_point` / angle = `label_rotation` (pre-resolved; no polylabel/OBB).
-- **Integration seams:** one bundle fetch in `MapEngine.#loadData` → `BundleLoader.load(dataUrl)` → both stores hydrate from the parsed object. `FloorLayer.hitTest` returns `unitId`; `HitTestManager.#classifyHit` maps it via `LocationStore.getLocationsByUnitId` (one-to-many) → `tap:location` when exactly one Location owns the unit, a disambiguation when ≥2 (multi-tenant unit), else `tap:floor`. `LocationLayer` reads `Location.displayNodes` (thin `{id, levelCode, point, rotation, fitScale, location}` records) filtered by active level.
-- **Reuse:** the whole sunwaymalls render/gesture/animation/transform stack, the component's built-in search + level-selector UI, `RectVisibility`/rbush for label overlap, `DataLoader` (gzip/cache) under `BundleLoader`, the Vitest harness + canvas/window/fetch mocks.
-- **Cross-cutting tech-stack decisions:** all resolved in [tars-epic.md](tars-epic.md) — Canvas-2D (no Konva), single bundle, string ids, raw coords/`renderScale=1`, unit-aware floor hit-test, mini-bundle test fixture, port 5080.
+  - **New pure ports** in `src/navigation/`: `NavGraph.js` (build the routing graph
+    from `MapLevel.navmesh` + bundle `transitions[]`), `TriangleAStar.js` (triangle-
+    adjacency A* + `findNearestTriangle`), `FunnelPath.js` (string-pull a triangle
+    path → `[x,y][]`). `MinHeap.js` is reused as-is.
+  - **Rebuilt in place:** `src/navigation/PathFinder.js` (triangle A* + funnel +
+    cross-floor + preference/step-free → `RouteResult`), `RouteManager.js` (thin
+    state + events over the new result), the three layers `src/layers/
+    NavigationLayer.js` / `NavMarkerLayer.js` / `PinMarkerLayer.js` (consume
+    segments / transitions / anchors).
+  - **Touched seams:** `src/data/MapGeometryModel.js` (`MapGeometryStore.buildNavGraph`
+    pass-through; `MapLevel.navmesh` is already hydrated), `src/core/MapEngine.js`
+    (`#bundleModel` field + rebuild `#createNavigationSystem`; `navigateTo` reads
+    `startAnchor` instead of `startNode.point`), `src/component/WayfinderMap.js`
+    (wire the already-scaffolded from/to + connector-toggle nav UI to `navigateTo`;
+    re-emit `route:error`).
+- **Patterns:**
+  - **One-fetch hydration** — the graph is built from the already-parsed
+    `BundleModel` inside `#createNavigationSystem`; no store fetches its own data
+    (`MapEngine.#loadData`).
+  - **Layer contract** — `renderWithContext` / `setFloor(levelCode)` / `hitTest` /
+    `dispose`; the engine drives the active floor via `setFloor` on all layers.
+  - **Bus → DOM re-emit** — `route:found`→`route-found`, `route:cleared`→
+    `route-cleared` already exist; add `route:error`→`route-error`
+    (`WayfinderMap.#wireEvents`).
+  - **Typed result, no throw** — `findPath` always returns `RouteResult`; callers
+    branch on `result.success`; failures carry a `code` enum.
+- **Integration seams:**
+  - `MapEngine.#createNavigationSystem` is the **only** wiring point that changes:
+    build `navGraph = mapGeometryStore.buildNavGraph(bundleModel.transitions)`, pass
+    it (+ `locationStore` for id→unit→snap resolution) to `PathFinder`.
+  - The floor-transition tap already routes through `NavMarkerLayer.hitTest →
+    tap:floor-transition → setFloor` (`MapEngine` interaction wiring) — preserved.
+  - `navigateTo` / `clearRoute` / `setFloor` / `centerOn` / `focusLocation` external
+    behavior unchanged; only `navigateTo`'s post-success anchor reads change.
+- **Reuse:** `MinHeap`; the RAF animation skeleton in `NavigationLayer`; the bubble
+  draw + screen-space hit-test in `NavMarkerLayer`; the speech-bubble pin draw +
+  `#resolveNode` dual-path in `PinMarkerLayer`; the scaffolded nav UI in
+  `WayfinderMap` (from/to fields, lift/escalator/step-free toggles, summary panel);
+  `MapLevel.navmesh` (already stored), `BundleModel.transitions` (already parsed).
+- **Cross-cutting tech-stack decisions:** inherited verbatim from `tars-epic.md`
+  (renderer strategy, engine, data contract, destination identity, route result
+  shape, coordinate space, route preferences, floor hit-testing, meshless level,
+  testing, dev/run). This phase opens no new cross-cutting question, so **no design
+  panel was re-run** — the epic-scope panel already resolved the *How*; a single
+  grounded `code-architect` pass produced this synthesis.
 
-<!-- Decision log (epic panel) -->
-- Rejected **Konva swap** — re-plumbs the proven gesture/marker/animation shell for no data-fidelity gain.
-- Rejected **new `WayfinderEngine.js`** — duplicates ~600 lines of working `MapEngine` orchestration.
-- Rejected **numeric `+1e6` facility ids** — fragile, silent shop/unit collisions; string namespacing is honest + URL-clean.
-- Rejected **style-grouped meshes in FloorLayer** — loses per-unit identity needed for polygon tap-to-select.
-- Rejected **0–1 normalization × renderScale** — FP drift + ambiguous for meshless L1; raw coords are simplest.
-- Rejected **real 2 MB bundle in all tests** — slow + non-deterministic; mini-bundle makes edge cases assertable.
+<!-- Decision log: no per-phase panel (epic settled the How). Sub-decisions resolved
+in the architect pass: (a) graph lives inside MapGeometryStore via a pure NavGraph
+builder, not a third store; (b) connector kind from member unit kind slug, not cost;
+(c) snap order = doors_by_unit[unit][0] (carries triangle_index) then
+centroids_by_unit[unit] + nearest-triangle search; (d) you-are-here start deferred
+to P3. -->
 
 ## Capability breakdown
 
-- [x] `map-bootstrap` — fork the Canvas-2D shell into this repo; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test/lint + dev server on :5080 · depends on: none
-- [x] `destination-catalog` — `LocationStore` builds the searchable/routable destination catalog: one `shop:<id>` Location **per placed (tenancy-referenced) shop** (multi-unit aware; a multi-tenant unit yields one Location per tenancy → `getLocationsByUnitId` is one-to-many), one `unit:<id>` per routable facility unit; connectors and unplaced shops excluded · depends on: `map-bootstrap`
-- [x] `floor-rendering` `(ui)` — unit-aware `FloorLayer` draws each active-level unit polygon with its resolved `unit→layer→kind` style; per-level visibility (an empty level draws nothing without error); fit-to-bounds with a fallback for meshless/empty levels; polygon `hitTest`→`unitId` · depends on: `map-bootstrap`
-- [x] `map-labels` `(ui)` — `LocationLayer` renders labels for labelable units at `label_point`/`label_rotation` with `_fitScale` shrink-to-polygon + screen-rect overlap suppression · depends on: `floor-rendering`, `destination-catalog`
-- [x] `floor-switching` `(ui)` — level selector lists the 5 levels in `position` order; `setFloor(code)` swaps the active level's geometry+labels and refits; emits `floor-changed` · depends on: `floor-rendering`
-- [x] `destination-search` `(ui)` — search filters the catalog by title/`search_tokens`; results dropdown + info card (title, venue, logo, description) · depends on: `destination-catalog`, `map-labels`
-- [x] `destination-focus` `(ui)` — `focusLocation(id)` and tapping a shop polygon both resolve to a Location, switch floor if needed, zoom in, and drop an end pin; clearing returns to browse · depends on: `destination-search`, `floor-rendering`
+- [x] `navmesh-routing` — triangle-A* + funnel over `navmesh_by_level`, cross-floor
+  via `transitions`, emitting per-floor polyline segments. · depends on: Phase-1
+  `destination-catalog`, `floor-rendering` (shipped)
+- [x] `route-preferences` — escalator/lift soft penalty (`cost` vs `cost + 100`) +
+  step-free hard gate (`is_accessible` only, else structured error). · depends on:
+  `navmesh-routing`
+- [x] `unroutable-level-handling` — meshless L1 / no-path / unknown-destination
+  return typed `{success:false, code}` results without throwing; the floor stays
+  browseable. · depends on: `navmesh-routing`
+- [x] `route-rendering` `(ui)` — animated route polyline per active floor; re-slices
+  on floor switch. · depends on: `navmesh-routing`, Phase-1 `floor-switching`
+- [x] `route-markers` `(ui)` — start/end pins at the snapped anchors + floor-
+  transition bubbles ("↑ tap to L3") that switch floor on tap. · depends on:
+  `route-rendering`
+- [x] `search-to-route` `(ui)` — the built-in from/to search + connector toggles
+  drive `navigateTo`; route/error feedback in the summary panel. · depends on:
+  `route-markers`, Phase-1 `destination-search`
 
 ## How to test           (the binding acceptance criteria)
 
-### `map-bootstrap`
-- `BundleLoader.load` on the real `SGC_v001.json` yields an indexed model with **5 levels** (codes B2,B1,L1,L2,L3), **10 kinds**, **158 units**, **20 shops**, **10 categories**, **2 transitions**, and `navmesh_by_level` keys exactly `{1,2,4,5}` (level id 3 / L1 absent).
-- The loader's indexes resolve: `kindsBySlug.get('elevator').is_accessible === true`, `kindsBySlug.get('escalator').is_connector === true && is_accessible === false`, `layersById` and `levelsById` return the matching records, and units are retrievable grouped by `level_id`.
-- Loading the synthetic **mini-bundle** fixture yields its documented counts (2 levels, 1 meshless, shops+escalator+elevator units, 1 transition) — proving the loader is data-driven, not SGC-hardcoded.
-- A bundle missing a required top-level key (e.g. no `units`) produces a structured load error (engine emits an `error` event), not an unhandled throw.
-- Engine init fetches a single `data-url` (no `map-url` request is made) and on success emits `data-loaded` with `floorCount === 5`.
-- `npm run build` emits `dist/` ESM + UMD + min bundles; `npm test` runs the Vitest suite; the dev script invokes `http-server` with `-p 5080`.
+<!-- Pure-port criteria run on the synthetic routing fixture (test/navigation/
+routingFixture.js): two MESHFUL levels F1 (L-shaped multi-triangle mesh where
+straight-line ≠ shortest) + F2 (rectangular), one MESHLESS level F0, and TWO
+connector groups between F1↔F2 — escalator (is_accessible:false, cost 1.0) and lift
+(is_accessible:true, cost 2.0). Counts deliberately differ from SGC. Real-bundle
+smoke tests are opt-in (skipped by default) and assert rules only. -->
 
-### `destination-catalog`
-- Catalog = **placed shops only**: the count of `shop:<id>` Locations **equals the number of distinct `shop_id`s across all unit `tenancies[]`**, not `shops[].length`. On the SGC seed that is **5** (Starbucks, ABC Mart Grand Stage, ASICS, Basta Hiro, Armani Exchange — from 4 tenanted units, all on L3); a shop present in `shops[]` but referenced by **no** tenancy (15 of 20 on this seed) yields **no** Location. `getLocation('shop:<id>')` round-trips and each carries `title` (shop name), `search_tokens` including the name + `unit_number` + category name, plus `logo`/`description`/`venue`.
-- A shop occupying multiple units exposes every unit in `unitIds[]` and every spanned floor in `levelCodes[]` (real seed has none — verified on the mini-bundle's multi-unit shop).
-- A **multi-tenant unit** (one polygon with ≥2 tenancies) produces **one `shop:<id>` Location per tenancy**, each listing that shared `unitId` (real seed: unit 121 → both `shop:7` ASICS and `shop:11` Basta Hiro). `getLocationsByUnitId(121)` returns **both** Locations.
-- Routable non-connector facility units (`kind.is_routable && !is_connector && !is_tenant`) become **one `unit:<id>` Location each** (mini-bundle: a `toilet` unit → `unit:<id>`); on the real SGC seed this set is **empty** (no facility units placed) so the catalog contains only the placed-shop Locations.
-- Connector units (escalator/elevator) and non-routable units (entrance/parking/other), and **vacant shop-kind units** (no tenancy — 149 of 153 on this seed), produce **no** Location.
-- `getLocationsByUnitId(unitId)` returns a **list** of the Locations owning that unit: empty for a connector or vacant unit, one for a single-tenant unit, ≥2 for a multi-tenant unit.
-- Every Location has `displayNodes` with one entry per unit: `point` = that unit's `label_point`, `rotation` from `label_rotation`, `levelCode` derived from `unit.level_id`.
+### `navmesh-routing`
+- `NavGraph.buildNavGraph(levels, transitions)` over the fixture yields
+  `levelGraphs` keyed `{F1, F2}` only — the **meshless F0 is absent**; and
+  `transitions` parsed to **2** bidirectional `RouteTransition` groups.
+- `triangleAStar(F1mesh, startTri, endTri)` on the L-shaped mesh returns the ordered
+  triangle-index sequence connecting them (length ≥ 3); on two **disconnected**
+  triangles it returns `[]`.
+- `findNearestTriangle(mesh, x, y)` returns the index of the triangle whose region
+  contains/﻿is-closest-to `(x,y)` (asserted for a shop centroid and a connector
+  centroid).
+- `funnelPath([0,1,2,3], F1mesh, start, end)` on the L-shape returns a polyline that
+  (a) begins at `start` and ends at `end`, (b) includes an **interior elbow vertex**
+  near the concave corner, and (c) is **strictly shorter** than a centroid-hop path
+  through the same triangles.
+- A straight corridor (`funnelPath([0,1], mesh, a, b)`) returns exactly `[a, b]` (no
+  spurious interior point).
+- `PathFinder.findPath('shop:A', 'shop:B')` for two shops on the **same** floor
+  returns `{success:true}` with `segments` a `Map` of size 1 keyed by that floor,
+  `transitions: []`, and `startAnchor`/`endAnchor` carrying `{levelCode,x,y}`.
+- A **cross-floor** `findPath('shop:A'(F1), 'shop:B'(F2))` returns `segments` of size
+  2 (`F1` and `F2` entries, each a non-empty `[x,y][]`), `transitions.length === 1`
+  with `fromLevelCode:'F1'`/`toLevelCode:'F2'` and `from/to` x,y at the connector
+  centroids, `levelCodes: ['F1','F2']`, and `distance` = the summed polyline length.
+- Same start==end point ⇒ `{success:true}` with a single-point segment and
+  `distance === 0`.
+- **Smoke (opt-in, real `SGC_v001.json`):** two shops on **L3** route with
+  `success:true` and a single-floor segment; a shop on **L2** to a shop on **L3**
+  routes with `success:true`, `transitions[0].kind === 'escalator'`, and segments on
+  both floors.
 
-### `floor-rendering` `(ui)`
-- `resolveStyle(unit, layersById, kindsBySlug)` returns the cascade: a unit with `stroke_color===""` inherits its kind's stroke color; `stroke_width===null` inherits; an explicit unit `fill_color` overrides the kind; with no overrides the kind's style is used (fallbacks `#000`/`#ccc`/width 1).
-- `geometryToPoints` on a closed GeoJSON ring of `N+1` coordinates returns `N` points (closing duplicate dropped).
-- For a chosen active level, the layer produces exactly one drawable polygon per unit on that level and **none** from other levels; switching the active level changes the produced set; editor `hidden`/`locked`/`opacity` flags do not affect output. An **empty active level** (L1 — 0 units) produces **zero** polygons without error.
-- `MapLevel.getBounds()` resolves by fallback: a level **with a navmesh** returns its `envelope_dims`; a **meshless level with units** returns the bbox union of its unit polygons (finite); a **meshless, unit-less level** (L1 on this seed) returns a **neutral default extent** (finite, non-degenerate) rather than an empty/NaN box.
-- `FloorLayer.hitTest(x,y)` returns the `unitId` whose polygon contains the point and `null` for empty space; `HitTestManager.#classifyHit` turns a catalogued `unitId` into a `tap:location` and a non-catalogued one into a `tap:floor`.
+### `route-preferences`
+- With `routeMode='escalator'` (default), the cross-floor F1→F2 route picks the
+  **escalator** group: `transitions[0].kind === 'escalator'`.
+- With `routeMode='lift'`, the same route picks the **lift** group:
+  `transitions[0].kind === 'lift'` (lift `cost 2.0` beats escalator `cost 2.0+100`).
+- **Soft penalty fallback:** when only the **non-preferred** connector exists between
+  the two floors (drop the preferred group from the fixture), the route **still
+  succeeds** using the available connector — it is not filtered out.
+- **Step-free hard gate, route exists:** with `stepFree=true`, the cross-floor route
+  uses **only the `is_accessible` (lift) group**: `transitions[0].is_accessible ===
+  true`, even when the escalator is cheaper.
+- **Step-free hard gate, no route:** with `stepFree=true` and **no accessible**
+  connector between the floors, `findPath` returns `{success:false,
+  code:'NO_PATH'}` (the inaccessible connector is gated to `Infinity`, not used).
+- Changing `routeMode` or `stepFree` **invalidates the cache** (a re-`findPath`
+  returns a result consistent with the new mode, not the stale one).
 
-### `map-labels` `(ui)`
-- A label is emitted only when the unit is labelable — `tenancies.length>0 && kind.is_tenant && labelsVisible`: a vacant `shop`-kind unit (no tenancy) and an `escalator` unit each emit **no** label; a tenanted shop unit emits its tenancy name.
-- The label anchor equals `unit.label_point` and its angle equals `unit.label_rotation` converted degrees→radians — with no polylabel/OBB recomputation (assert a known `label_rotation` maps to the expected radians).
-- `_fitScale` returns `<1` for a long label in a small polygon (so the rotated text box fits the unit extents) and is **clamped at 1** (never upscales) when the label already fits.
-- When two label screen-rects overlap, the lower-priority label is suppressed (one survives), exercising the RectVisibility/rbush path.
+### `unroutable-level-handling`
+- `findPath` to a destination on the **meshless** level F0 returns
+  `{success:false, code:'MESHLESS_LEVEL'}` — and does **not** throw.
+- `findPath` for an **unknown** destination id returns `{success:false,
+  code:'UNKNOWN_DESTINATION'}`.
+- A destination that resolves to a unit with **no snappable navmesh point** (no
+  `doors_by_unit` entry and no `centroids_by_unit` entry) returns `{success:false,
+  code:'SNAP_FAILED'}`.
+- `RouteManager.navigateTo` on any `!success` result **emits `route:error`** with
+  `{code, error, fromId, toId}` and leaves `getCurrentRoute()` `null`; no layer is
+  populated.
+- The meshless level **remains selectable/browseable**: `setFloor(F0)` after a
+  failed route succeeds and the floor renders (no route state leaks onto it).
+- **Smoke (opt-in, real bundle):** a destination on **L1** (id 3, no mesh) ⇒
+  `{success:false, code:'MESHLESS_LEVEL'}`.
 
-### `floor-switching` `(ui)`
-- `getFloors()`/the selector lists all **5** level codes ordered by `Level.position` (B2 lowest … L3 highest).
-- `setFloor('L2')` makes L2 the active rendered level (geometry + labels reflect L2), sets `currentFloor==='L2'`, refits the view, and emits a `floor-changed` event with `{floor:'L2'}`.
-- On load with `default-floor` set, that floor is active; with it unset, the first floor by the engine's priority is active.
-- Selecting **L1** activates it without error and renders its geometry — which is **empty on this seed (0 units)** — still framing sensibly via the `getBounds()` fallback. The sparse floors B2/B1 (1 unit each) likewise activate and render cleanly.
+### `route-rendering` `(ui)`
+- `NavigationLayer.setPath(routeResult)` for a 2-floor route ⇒ `hasPath()` is `true`;
+  with floor `F1` active the layer's filtered points equal `segments.get('F1')`,
+  and after `setFloor('F2')` they equal `segments.get('F2')`.
+- `setFloor` to a floor **not** in `segments` (e.g. F0) ⇒ `hasPath()` is `false` and
+  the layer draws nothing (no throw).
+- `setPath` **starts** the animation (`getAnimationStatus().isAnimating === true`)
+  and `clearPath()` **stops** it and drops the stored result.
+- `renderWithContext` draws **two strokes** (full grey path + partial animated path)
+  using `segment[i][0]/[1]` coordinates — asserted via a mock 2D context recording
+  `moveTo`/`lineTo` calls over the active floor's points.
+- After `engine.navigateTo` success, the engine `setFloor`s to `startAnchor.levelCode`
+  and `centerOn`s `(startAnchor.x, startAnchor.y)` (reusing the focus camera path).
 
-### `destination-search` `(ui)`
-- A query matching a placed shop name (case-insensitive substring over title/`search_tokens`) returns that shop's Location in results; a query matching nothing returns an empty result set. An **unplaced** shop (no Location) is **not** searchable.
-- Selecting a result opens an info card exposing the Location's `title`, `venue`, `logo` (when present), and `description`.
-- A facility Location is searchable (mini-bundle: querying "toilet" returns the `unit:<id>` facility); connector units never appear in results.
+### `route-markers` `(ui)`
+- `PinMarkerLayer.setPath(routeResult)` renders the **start** pin at
+  `startAnchor.(x,y)` only when `startAnchor.levelCode` is the active floor, and the
+  **end** pin at `endAnchor.(x,y)` only when `endAnchor.levelCode` is active (asserted
+  by switching floors against a mock context).
+- `NavMarkerLayer.setPath` stores `routeResult.transitions`; with the **departure**
+  floor active it draws a bubble at `(transition.fromX, fromY)` with an **up/down
+  arrow** derived from level ordinals; with the **arrival** floor active it draws at
+  `(transition.toX, toY)`.
+- `NavMarkerLayer.hitTest(worldX, worldY)` over a rendered bubble returns the **target
+  level code** to switch to (departure bubble → `toLevelCode`); a miss returns
+  `null`.
+- `clearRoute()` clears all three layers (no start/end pin, no bubble, no polyline
+  on any floor).
 
-### `destination-focus` `(ui)`
-- `focusLocation('shop:<id>')` switches to a floor the shop occupies, animates a zoom-in, and places an end pin at the shop's `displayNode` point; the focused Location is reflected by the engine.
-- Tapping a shop's polygon resolves `unitId`→Location(s): a **single-tenant** unit focuses that one Location and emits `location-tap` carrying it; a **multi-tenant** unit (≥2 Locations, e.g. unit 121) surfaces a disambiguation rather than silently picking one, so both shops stay reachable.
-- Focusing a Location on a different floor switches the floor first; for a multi-unit shop, focus targets the unit on the current floor when present, else the shop's first unit/floor.
-- `clearRoute()` (return to browse) removes the pin and restores browse mode.
+### `search-to-route` `(ui)`
+- With both `from` and `to` chosen, triggering navigation calls
+  `engine.navigateTo(fromId, toId, …)` with the string-namespaced ids and, on
+  success, sets map mode to `navigation` and populates the summary panel with the
+  resolved **from/to titles**.
+- The **lift** / **escalator** toggle sets the route mode and **re-routes** (a
+  subsequent `route-found` reflects the chosen connector kind); the **step-free**
+  toggle sets `stepFree` and re-routes.
+- A failed route (e.g. meshless destination) surfaces the **error** in the UI (a
+  `route-error` DOM event is dispatched and the summary shows the error, no polyline
+  drawn).
+- `clearRoute` from the UI returns the component to **browse** mode (nav summary
+  hidden, route layers cleared).
+- `element.navigateTo({from, to})` (public API) returns the `RouteResult` and drives
+  the same rendering as the built-in UI.
 
 ## Design intent         (UI-facing `(ui)` capabilities only — guidance, not a gate)
 
-Aesthetic bar & reference: match the `webmap-sunwaymalls` look-and-feel (it is the visual reference this is forked from) while rendering SGC's real geometry with the indoorcms fidelity. Clean, calm indoor-mall map; the floor geometry is the hero, chrome is minimal and unobtrusive. Desktop + mobile/touch kiosk both matter (device mode resolved at init, ≤768px = mobile).
+### `route-rendering`
+- **Layout & hierarchy:** the route is the hero once active — a calm, confident
+  polyline tracing the walkable path on the current floor; the rest of the floor
+  recedes (matches focus-mode dimming). Empty state = no route (browse). Error state
+  = no polyline drawn, message in the summary panel.
+- **Interaction:** animated "walk" along the path (grey full path underneath, a
+  darker progress stroke advancing start→end, looping) to imply direction of travel;
+  redraws smoothly on floor switch to the per-floor slice.
+- **Responsive:** path stroke width / pin size scale sensibly at DPR>1 and across
+  desktop/mobile; the auto-fit framing keeps the active floor's route in view.
+- **Accessibility:** the canvas is decorative — the searchable catalog + the textual
+  from/to summary are the accessible path; route availability is announced via the
+  `route-found`/`route-error` DOM events.
+- **Reference:** the sunwaymalls shell's animated route look; reuse the existing RAF
+  skeleton and stroke styling.
 
-### `floor-rendering`
-- **Layout & hierarchy:** the floorplan fills the viewport and auto-fits on load (`min-zoom: fit`); unit polygons fill by kind color with subtle strokes so tenancy blocks read as distinct rooms; the active floor is the only geometry shown. Empty/edge state: a sparse level (B2/B1, 1 unit) or a fully empty level (L1, 0 units) still frames sensibly via the `getBounds()` fallback rather than collapsing or erroring.
-- **Interaction:** smooth pan / pinch-zoom (rotation optional); tapping a shop polygon gives immediate visual acknowledgement (hands off to `destination-focus`); tapping empty space does nothing jarring.
-- **Responsive:** per-device viewport tuning (render-scale/zoom) resolved at init; crisp on DPR>1.
-- **Accessibility:** canvas is decorative; the searchable catalog (below) is the accessible path to every destination; respect reduced-motion for fit/zoom animations.
-- **Reference:** sunwaymalls `FloorLayer` visual weight; indoorcms `resolveStyle` cascade for colors.
+### `route-markers`
+- **Layout & hierarchy:** speech-bubble pins — a "start" pin at the origin and an
+  "end" pin at the destination, each only on its own floor; floor-transition bubbles
+  ("↑ Tap to L3") sit on the connector, clearly tappable.
+- **Interaction:** tapping a transition bubble switches to the connected floor and
+  re-centers on the arrival side; pins use the same speech-bubble idiom as Phase-1
+  focus.
+- **Responsive:** bubbles and arrows scale with DPR and shrink-to-fit on mobile;
+  remain legible over the floor fill.
+- **Accessibility:** transition affordance is mirrored by the existing
+  `tap:floor-transition` → `floor-transition-tap` DOM event; arrow direction encodes
+  up/down by level ordinal.
+- **Reference:** Phase-1 `destination-focus` end pin; the carried-over bubble
+  drawing in `NavMarkerLayer`.
 
-### `map-labels`
-- **Layout & hierarchy:** shop names sit centered on their unit at the pre-resolved anchor/rotation, legible at a glance with a light halo for contrast over fills; labels hold constant screen size across zoom; overlaps thin out gracefully rather than colliding.
-- **Interaction:** labels track their unit during pan/zoom without jitter; suppressed labels reappear when zoom relieves the collision.
-- **Responsive:** base + min font size per device; never upscale beyond the unit (`_fitScale` ≤ 1).
-- **Accessibility:** label text mirrors the searchable `title`; contrast target ≥ 4.5:1 against typical fills.
-- **Reference:** indoorcms `label-overlay.js` placement/fit; sunwaymalls `LocationLayer` typography knobs.
-
-### `floor-switching`
-- **Layout & hierarchy:** a vertical floor-button stack (highest floor on top), the active floor clearly marked; ordered by `Level.position`.
-- **Interaction:** one tap switches floors with a quick refit; the selection state is obvious; L1 is selectable like any floor.
-- **Responsive:** comfortable tap targets (≥44px) on mobile/kiosk; reachable thumb zone.
-- **Accessibility:** ARIA-labelled buttons, keyboard-navigable, focus ring visible, current floor announced.
-- **Reference:** sunwaymalls built-in level-selector.
-
-### `destination-search`
-- **Layout & hierarchy:** desktop = top-left search panel with results dropdown + info card; mobile = fullscreen overlay with an expand/collapse info panel. The query field is the primary affordance; results show name + venue (+ logo when present).
-- **Interaction:** type-to-filter with responsive results; selecting a result opens the info card and (via focus) frames it on the map; clear/close returns to browse. Empty state: "no matches" messaging; loading is effectively instant (in-memory index).
-- **Responsive:** distinct desktop panel vs mobile fullscreen layouts at the 768px breakpoint.
-- **Accessibility:** input is labelled, results are a keyboard-navigable listbox, Enter selects, Esc closes, focus is managed into/out of the overlay.
-- **Reference:** sunwaymalls search control (desktop panel / mobile overlay).
-
-### `destination-focus`
-- **Layout & hierarchy:** the focused destination is centered and zoomed with a single clear end pin (speech-bubble style) showing its name; the rest of the floor recedes.
-- **Interaction:** focusing from search or from a polygon tap behaves identically; a cross-floor focus switches floors first; a back/clear affordance returns to browse and removes the pin.
-- **Responsive:** focus zoom level + pin sizing scale per device/DPR.
-- **Accessibility:** focus change is announced (the destination name); the pin's information is available as text, not color alone.
-- **Reference:** sunwaymalls focus mode + `PinMarkerLayer` end marker.
+### `search-to-route`
+- **Layout & hierarchy:** reuse the Phase-1 search panel; a from/to pair with a clear
+  "swap"/direction affordance, connector toggles (escalator / lift / step-free), and
+  a bottom **summary panel** showing from → to (+ error state inline). Desktop =
+  top-left panel; mobile (≤768px) = fullscreen overlay + bottom summary card.
+- **Interaction:** choosing a destination as *to* (e.g. from a search result or
+  polygon tap) and a *from* triggers routing; toggles re-route live; a back/clear
+  control returns to browse.
+- **Responsive:** 768px breakpoint (inherited); the summary panel is a bottom card on
+  mobile, inline on desktop.
+- **Accessibility:** labelled from/to inputs, keyboard-navigable results, Esc clears;
+  ARIA-labelled connector toggles with visible focus; error text is readable, not
+  color-only.
+- **Reference:** Phase-1 `destination-search` panel + info card; the scaffolded nav
+  UI fields/toggles already present in `WayfinderMap`.

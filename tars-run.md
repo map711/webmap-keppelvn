@@ -1,115 +1,85 @@
-# Run — Phase 1: Browse the map
-Started:  2026-06-05 22:13:47
-Status:   ✓ complete · 7/7 green (across 2 run segments — see resume below)
+# Run — Phase 2: Wayfinding (Keppel Webmap / SGC)
+Started:  2026-06-06 08:19:11
+Status:   ✓ complete
 
 ## Progress
 
-### map-bootstrap ✓
-Started 22:24 — fork the Canvas-2D shell, single data-url bundle load + index, engine init, build/dev :5080. Ended 22:52
-  22:24  RED        ✓ 22 tests written, fail on assertion
-  22:26  integrity  ✓ pins all 6 criteria; RED assertion-shaped, no weak tests
-  22:31  GREEN      ✓ 22/22 pass; BundleLoader+single-bundle init, dev :5080
-  22:36  review    ✗ ⚠ npm run build fails — rollup toolchain not installed/locked
-  22:39  review    ✓ toolchain installed+locked; build emits 3 bundles; test exercises build
-  22:41  review    ✓ both findings resolved; build emits 3 bundles, 5/5 green
-  22:46  QA        ✗ ⚠ green-but-wrong: real engine init double-fetches, floorCount=0 (crit 5)
-  22:49  QA        ✓ real stores hydrate parsed bundle; single fetch, floorCount=5
-  22:52  QA        ✓ re-test: bug#1 fixed, single fetch floorCount=5, suite green
+<!-- Roster agents append their own ### <slug> subsections + per-gate ticker lines as the run crosses each gate.
+Ticker line format:  HH:MM  <gate>  <symbol> <note>   ·   gates in loop order: RED · integrity · GREEN · review · QA -->
 
-### destination-catalog ✓
-Started 22:57 — LocationStore builds the placed-shop+facility destination catalog (multi-tenant/multi-unit aware). Ended 23:10
-  22:57  RED        ✓ 21 tests written, fail on assertion
-  22:59  integrity  ✓ pins all 7 criteria; no weak tests
-  23:03  GREEN      ✓ 21/21 pass; placed-shop+facility catalog, suite 44/44 green
-  23:06  review    ✓ all 7 criteria covered; no findings ≥80; 44/44 green
-  23:10  QA        ✓ code-only · criteria 1–7 verified vs real SGC + own mini-bundle
+### navmesh-routing ✓
+  08:27  started — RED tests for triangle-A* + funnel + cross-floor
+  08:27  RED       ✓ 13 tests written, fail on assertion (ports unbuilt)
+  08:27  RED       ⚠ smoke 9 cross-floor: no L2 shop on seed; routes to L2 escalator anchor
+  08:29  integrity  ✓ pins all 9 criteria; behavioural, no gameable tests
+  08:44  GREEN      ✓ passing (impl 1/4) — 13/13 ports+PathFinder; full suite 140 green
+  08:47  review    ✗ ⚠ dead #cache in PathFinder (memoises nothing); 13/13 green
+  08:49  review    ✓ removed dead #cache field; 13/13 + 140 suite green
+  08:50  review     ✓ re-check: #cache finding resolved; no new issues
+  08:55  QA        ✓ code-only · criteria 1-9 verified independently (incl. real SGC)
+  Completed: 2026-06-06 08:55
 
-### floor-rendering ✓
-Started 23:15 — unit-aware FloorLayer: resolveStyle cascade, geometryToPoints, per-level drawables, getBounds fallback, hitTest→unitId. Ended 23:45
-  23:15  RED        ✓ 20 tests written, fail on assertion
-  23:18  integrity  ✓ pins all 5 criteria; no weak tests, RED assertion-shaped
-  23:23  GREEN      ✓ 20/20 pass; per-unit drawables+cascade+hitTest→unitId, suite 64/64
-  23:27  review     ✓ no findings ≥80; 20/20 pass, fixture-grounded, no weak tests
-  23:45  QA        ✓ criteria 1-5 verified code+render; all gates passed
+### route-preferences ✓
+  08:59  started — RED tests for connector soft penalty + step-free hard gate
+  08:59  RED       ✓ 9 tests written; step-free gate red on assertion (is_accessible/NO_PATH)
+  08:59  RED       ⚠ soft-penalty (crit 1-3) pre-built under navmesh-routing; lift kind=elevator not 'lift'
+  09:00  integrity  ✓ pins all 6 criteria; behavioural, no gameable tests
+  09:03  GREEN     ✓ passing (impl 1/4); step-free gate + is_accessible; 148 suite green
+  09:06  review    ✓ no findings ≥80; soft penalty + step-free gate correct, tests behavioural
+  09:09  QA        ✓ code-only · criteria 1-6 verified (incl real SGC); ⓘ kind='elevator' not 'lift'
+  Completed: 2026-06-06 09:09
 
-### map-labels ✓
-Started 23:56 — LocationLayer renders labelable-unit labels at label_point/label_rotation with _fitScale + overlap suppression. Ended 00:22
-  23:56  RED        ✓ 8 tests written, fail on assertion
-  23:58  integrity  ✓ pins all 4 criteria; RED assertion-shaped, no weak tests
-  00:04  GREEN      ✓ 12/12 pass; suite 76/76. ⚠ reconciled deg→rad rotation w/ catalog test
-  00:08  review    ✓ all 4 criteria covered; 76/76 green; no findings ≥80
-  00:15  QA        ✗ ⚠ green-but-wrong: UI never mounts (ctor sets attr + map-url still required); labels render nothing
-  00:18  QA        ✓ deferred host mutation to connectedCallback; dropped map-url gate
-  00:22  QA        ✓ re-test: bug#1+#2 fixed in real browser; labels paint, 76/76
+### unroutable-level-handling ✓
+  09:14  started — RED tests for typed failure codes (MESHLESS/UNKNOWN/SNAP), no throw
+  09:14  RED       ✓ 9 tests written, 7 fail on assertion (codes + fromId/toId payload)
+  09:14  RED       ⚠ crit-5 (2 tests) green-but-correct: meshless already browseable, no-leak holds
+  09:16  integrity  ✓ pins all 6 criteria; behavioural, hardcoded codes, no gameable tests
+  09:20  GREEN     ✓ typed codes + fromId/toId payload; 30/30 file, 157/157 suite
+  09:22  review    ✓ no findings ≥80; typed codes + route:error payload correct, tests behavioural
+  09:26  QA        ✓ code-only · criteria 1-6 verified on real bundle (48+11 asserts)
+  Completed: 2026-06-06 09:26
 
-### floor-switching ✓
-Started 00:31 — engine floor selection: getFloors order, setFloor swaps geometry+labels+refit, floor:changed event; default-floor vs priority; empty L1 + sparse B2/B1. Ended 00:57
-  00:31  RED        ⚠ 17 tests written, GREEN-on-arrival (floor API in forked shell); fault-injection-verified binding
-  00:34  integrity  ⤺ ⚠ strong+mutation-verified but GREEN-on-arrival (impl pre-exists), no RED to gate
-  00:38  RED        ⤺ ⚠ rewrite: tests strong+fault-verified but impl pre-exists (brownfield); regression-lock, no RED
-  00:42  integrity  ✓ pins all 4 criteria; brownfield regression-lock, 5 mutations flip RED
-  00:43  GREEN      ✓ 17/17 pass on pre-existing floor API; suite 93/93, no code change
-  00:46  review    ✗ ⚠ green-but-wrong: setFloor refit only on first load, UI tap never refits
-  00:49  review    ✓ ⚠ fixed green-but-wrong: setFloor refits by default; UI tap pinned
-  00:51  review    ✓ finding 1 resolved; plain setFloor refits, pan paths opt out
-  00:57  QA        ✓ browser-verified criteria 1-4: order, setFloor+event, default/priority, empty L1
+### route-rendering ✓
+  09:31  started — RED tests for per-floor slice + two-stroke draw + engine handoff
+  09:31  RED       ⚠ 13 tests; regression-lock (impl pre-exists), fault-injected RED on each criterion
+  09:34  integrity ✓ pins all 5 criteria; fault-injection confirms each flips RED
+  09:35  GREEN     ✓ 13/13 pass; impl pre-existed from navmesh-routing (impl 1/4)
+  09:38  review    ✓ no findings ≥80; per-floor slice + two-stroke + engine handoff correct
+  09:42  QA        ✓ code-only · criteria 1-5 verified (real layer+engine); ⓘ browser-QA skipped (chrome-devtools busy)
+  Completed: 2026-06-06 09:42
 
-### destination-search ✓
-Started 01:06 — built-in search filters the catalog by title/search_tokens; results dropdown + info card (title/venue/logo/description); facilities searchable, connectors excluded. Ended 01:31
-  01:06  RED        ✓ 12 tests written, fail on assertion (⚠ catches kind-filter bug)
-  01:08  integrity  ✓ pins all 3 criteria; 10/10 RED on assertion errors
-  01:13  GREEN      ✓ passing (impl 1/4) — string-id/lowercase-kind search fixes
-  01:16  review    ✓ all 3 criteria covered; 107/107 green; no findings ≥80
-  01:23  QA        ✗ ⚠ green-but-wrong: result select never opens info card (focus fails)
-  01:26  QA        ✓ fixed: #pickLocationNode reads displayNodes; 107/107 green
-  01:31  QA        ⚠ ✓ re-test browser: bug#1 fixed, focus→info-card live-verified
+### route-markers ✓
+  09:47  started — RED tests for start/end pins + transition bubbles + clearRoute fan-out
+  09:48  RED       ✓ 10 tests (4 RED on assertion: stored-transition coords + hitTest)
+  09:50  integrity  ✓ pins all 4 criteria; crit 2/3 RED on coords
+  09:53  GREEN      ✓ passing (impl 1/4) — NavMarkerLayer reads stored transitions
+  09:56  review    ✗ ⚠ end pin never renders in prod (result has no endLocation)
+  09:59  review    ✓ ⚠ end pin sourced from anchor; PathFinder threads endLocation
+  10:02  review    ✓ re-check: both findings resolved; 53 tests green
+  10:08  QA        ✓ ⓘ criteria 1-4 verified on real stack+engine; browser-QA skipped (chrome-devtools locked)
+  Completed: 2026-06-06 10:08
 
-### destination-focus ✓
-Started 01:40 — focus/select a shop: switch floor + zoom + end-pin at displayNode; tap polygon resolves unitId→Location(s) (single→location-tap, multi-tenant→disambiguate); clearRoute restores browse. Ended 07:07
-  01:40  RED        ✓ 16 tests written; brownfield regression-lock, fault-injection-verified on all 4 criteria
-  01:43  integrity  ✓ pins all 4 criteria; 5 mutations flip RED, fixture-grounded
-  01:44  GREEN     ✓ pass 16/16 (impl 1/4); full suite 123/123, no regressions
-  01:50  review    ✗ ⚠ green-but-wrong: focus end-pin never renders (mock hides it)
-  01:55  review    ✓ ⚠ fixed pin-render fallback + disambiguate forward; behavioral re-emit tests
-  01:57  review    ✓ re-check: all 3 findings resolved; 17/17 green
-  02:14  QA        ✗ ⚠ errored — QA agent finished without emitting StructuredOutput (after 2 retries); code is built + review-green but the QA verdict was never recorded. Checkbox left unflipped → re-run restarts this capability cleanly.
-  06:25  integrity  ⤺ ⚠ re-run: impl pre-exists → suite 17/17 GREEN, not RED; 2 DOM re-emit tests are source-grep gameable → rewrite
-  06:38  GREEN     ✓ pass 18/18 (impl 1/4); regression-lock, impl pre-exists; suite 125/125
-  07:01  QA        ✓ ⚠ fixed stale minScale floor; refit after tiny floor no longer stuck at 2.5
-  07:07  QA        ✓ all criteria passed; capability complete
+### search-to-route ✓
+  10:16  started — RED tests for from/to nav UI + connector/step-free toggles + navigateTo
+  10:16  RED       ⚠ 14 tests; 13 regression-lock (impl pre-exists, fault-injected RED), 1 RED on engine.setStepFree seam
+  10:17  integrity ⤺ ⚠ 13/14 already green pre-impl (scaffold); toggle UI untested → rewrite
+  10:25  RED       ⤺ ⚠ narrowed to connectorConstraint seam; 6 RED via real lift/escalator toggles
+  10:26  integrity ✓ pins all 5 criteria; 6 RED on connector-constraint seam
+  10:29  GREEN     ✓ passing (impl 1/4) — connectorConstraint hard gate in PathFinder
+  10:33  review    ✓ pass — 196/196 green; all 5 criteria bound, no weak tests
+  10:40  QA        ✓ ⓘ crit 1-5 verified on real engine (45 asserts, fixture+SGC); browser-QA skipped (chrome-devtools locked); ⚠ no distinct step-free toggle (lift-only constraint serves accessibility)
+  Completed: 2026-06-06 10:40
 
-Ended:    2026-06-06 02:14:08
-Duration: 4h 0m 21s · 6/7 green · 0 blocked · 1 errored
+Ended:    2026-06-06 10:41:32
+Duration: 142m 21s · 6/6 green · 0 blocked · 0 errored
 
 ## Highlights  ← for the human · to improve the agents
 
-- ✗ **destination-focus** errored at the QA gate — the `code-qa` agent completed without calling its StructuredOutput tool (after the loop's 2 retries), so no QA verdict was recorded and the checkbox stays unflipped. Its prior gates all passed (RED 16 tests → integrity → GREEN 17/17 → review, all 3 findings resolved), so the code is built and review-green; only the final QA handoff failed. A re-run (`/tars:run`) restarts just this capability — the test-writer's idempotent block means no duplicate tests. If it recurs, the QA agent's prompt may need a firmer "you MUST call StructuredOutput" nudge for browser-mode verdicts.
-- ✓ **green-but-wrong caught by QA** (the §5.2 ⑤ backstop earning its keep): `map-bootstrap` (real engine init double-fetched, floorCount=0), `map-labels` (component never mounted — ctor set attrs + still required map-url; labels rendered nothing), `destination-search` (result select never opened the info card). All three passed unit tests but failed live behavior; QA caught each and remediation fixed them.
-- ✓ **green-but-wrong caught by review:** `floor-switching` (setFloor refit only ran on first load, so a UI floor-tap never refit the view) and `destination-focus` (focus end-pin never rendered). Both fixed within the review remediation cap.
-- ⚠ **`map-bootstrap` toolchain gap:** first review found `npm run build` failed — the rollup toolchain wasn't installed/locked. Resolved (installed + locked, build now emits 3 bundles), but worth noting the fork didn't carry a working build toolchain out of the box.
-- ⚠ **`floor-switching` GREEN-on-arrival:** the forked shell already implemented the floor API, so the RED tests passed on arrival with no failing target. The test-writer correctly pivoted to a fault-injection-verified brownfield regression-lock (1 integrity rewrite, 5 mutations flip RED) — the right call, but a sign that brownfield capabilities ported wholesale from the shell need the regression-lock framing rather than classic RED.
-- ⓘ **`floor-rendering` browser-QA skipped** (chrome-devtools-mcp not available for that capability) — it was verified code+render-only; the other `(ui)` capabilities (map-labels, floor-switching, destination-search) did get live-browser QA.
+- ✓ **route-markers** — review backstop earned its keep: caught that the **end pin never renders in prod** (the `RouteResult` carried no `endLocation`), fixed by threading `endLocation` from the anchor through `PathFinder`. A green-but-wrong the unit tests alone missed.
+- ✓ **navmesh-routing** — review caught a **dead `#cache` field in `PathFinder`** that memoised nothing; removed. No behavioural impact, but a real over-engineering smell flagged before it set a precedent.
+- ⚠ **search-to-route** — the integrity gate fired **1 rewrite**: 13/14 RED tests were green *before* implementation (the carried-over scaffold already satisfied them — regression-locks, not new-behaviour pins). Tests were narrowed to the real `connectorConstraint` seam (6 genuine RED). Nudge: when a capability's impl pre-exists from scaffolding, test-writer should target the *new seam* up front rather than regression-lock the scaffold.
+- ⓘ **route-preferences / search-to-route** — connector kind slug is `'elevator'`, not `'lift'`, in the real bundle; the lift toggle maps to it. Harmless naming mismatch, worth a doc note so callers don't assert `'lift'`.
+- ⓘ **route-rendering · route-markers · search-to-route** (all `(ui)`) — **browser-QA skipped** (chrome-devtools-mcp busy/locked during the run). Each was QA'd code-only against the real layer + engine stack; a live-browser smoke pass is still owed. Run `/tars:review --ui` (or re-QA) once the browser tool is free.
+- ⚠ **search-to-route** — no *distinct* step-free toggle in the UI; the lift-only connector constraint serves the accessibility path. Acceptable per plan, but flag if a separate step-free control is wanted later.
 
-Legend: `✓` pass · `⤺` remediation iter · `✗` fail/blocked/errored · `⚠` highlight · `ⓘ` note.
-
----
-
-### ↻ resumed 2026-06-06 06:18:02
-Status:   ✓ complete · 1/1 green (destination-focus — recovered the errored capability)
-
-  06:22  RED        ✓ 17 tests (re-run); brownfield regression-lock, all 4 criteria fault-injection-verified RED
-  06:33  RED        ⤺ ⚠ rewrite: 2 source-grep DOM tests replaced w/ real-component #wireEvents; forwarder-disable now flips RED
-  06:37  integrity  ✓ pins all 4 criteria; 8 mutations flip RED (1 redundant hasRoute assert noted)
-  06:42  review     ✓ all 4 criteria covered; 125/125 green; no findings ≥80
-  06:59  QA         ✗ ⚠ green-but-wrong: minScale stuck after B2/B1 fit blocks focus zoom-in
-  07:07  QA        ✓ re-test: bug#1 fixed, refit→0.17 post-tiny-floor, focus zooms+pins; 125/125
-
-Ended:    2026-06-06 07:08:24
-Duration: 50m 22s · 1/1 green · 0 blocked · 0 errored
-Cycle total (both segments): 7/7 green · 0 blocked · 0 errored
-
-## Highlights (resume segment)
-
-- ✓ **destination-focus recovered** — the capability that errored at QA last segment is now green. The re-run found the impl pre-existing (suite 17/17 GREEN, not RED), so the test-writer rewrote 2 source-grep-gameable DOM re-emit tests into real-component `#wireEvents` tests (forwarder-disable now flips RED) and added one — 18 tests, integrity pins all 4 criteria (8 mutations flip RED).
-- ✓ **green-but-wrong caught by QA again** (the backstop earning its keep): focus zoom-in was blocked because `minScale` stayed stuck after fitting a tiny floor (B2/B1), so the camera couldn't zoom past 2.5×. Fixed — refit now reaches ~0.17 after a tiny floor and focus zooms + drops its pin. This is the live-behavior bug the *previous* segment's QA never got to record (it errored on the structured-output handoff first).
-- ⓘ The previous segment's StructuredOutput-miss did **not** recur — QA emitted its verdict cleanly this time.
+Legend: `✓` pass · `⤺` remediation iter · `✗` fail/blocked · `⚠` highlight · `ⓘ` note.
