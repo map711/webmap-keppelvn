@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guide: JavaScript API</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-slate-100">
+    <div class="mx-auto max-w-4xl px-6 py-12">
+
+      <nav class="mb-8">
+        <a href="index.html" class="text-xs uppercase tracking-[0.35em] text-slate-400 hover:text-slate-200">Demos</a>
+        <span class="mx-2 text-xs text-slate-600">/</span>
+        <span class="text-xs uppercase tracking-[0.35em] text-slate-300">JavaScript API Guide</span>
+      </nav>
+
+      <header class="mb-10 space-y-3">
+        <h1 class="text-3xl font-semibold tracking-tight text-white sm:text-4xl">JavaScript API</h1>
+        <p class="max-w-2xl text-base text-slate-300">
+          Beyond the declarative attributes, the
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">&lt;wayfinder-map&gt;</code>
+          element exposes an imperative API on its DOM instance. From host JavaScript you can trigger
+          a route, focus a shop, switch floors, drive the camera, read the catalog, and listen for
+          events &mdash; everything the built-in controls do, under your own UI.
+        </p>
+      </header>
+
+      <section class="mb-10 flex gap-4">
+        <a href="api.html" class="rounded-xl border border-slate-700/60 bg-slate-900/60 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white">Open the demo &rarr;</a>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-4 text-xl font-semibold text-white">When to use this pattern</h2>
+        <p class="text-sm leading-relaxed text-slate-300">
+          Drive the map from JavaScript when you want your own chrome instead of (or alongside) the
+          built-in controls &mdash; an external search box that calls
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">focusLocation()</code>, a
+          &ldquo;Get directions&rdquo; button that calls
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">navigateTo()</code>, a
+          deep-link handler that switches floors and zooms on load, or analytics that react to
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">location-tap</code> events.
+          The element still renders the map; you orchestrate it.
+        </p>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-6 text-xl font-semibold text-white">Step-by-step setup</h2>
+
+        <div class="mb-8">
+          <h3 class="mb-2 text-base font-semibold text-slate-200">1. Import and grab the element</h3>
+          <p class="mb-3 text-sm text-slate-300">
+            Same import boilerplate as every demo: an import map for
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">qrcode-generator</code> plus
+            the module import that registers the custom element.
+          </p>
+          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;wayfinder-map data-url="../datas/SGC_v001.json" default-floor="L3" level-selector&gt;&lt;/wayfinder-map&gt;
+
+&lt;script type="module"&gt;
+  import "../dist/wayfinder-map.esm.js";
+  const map = document.querySelector("wayfinder-map");
+&lt;/script&gt;</code></pre>
+        </div>
+
+        <div class="mb-8">
+          <h3 class="mb-2 text-base font-semibold text-slate-200">2. Wait for <code class="text-sky-300">ready</code> before calling methods</h3>
+          <p class="mb-3 text-sm text-slate-300">
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">init()</code> runs
+            automatically on connect when <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">data-url</code>
+            is present, but it is asynchronous (it fetches the bundle). Calling a method before the
+            engine is ready throws <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">"wayfinder-map: Not initialized"</code>.
+            Wait for the <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">ready</code>
+            event &mdash; and guard against it having already fired.
+          </p>
+          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">function start() {
+  // safe to call the API now
+  console.log(map.floors, map.currentFloor);
+}
+if (map.isInitialized) start();
+else map.addEventListener("ready", start, { once: true });</code></pre>
+        </div>
+
+        <div class="mb-8">
+          <h3 class="mb-2 text-base font-semibold text-slate-200">3. Resolve IDs from <code class="text-sky-300">getLocations()</code></h3>
+          <p class="mb-3 text-sm text-slate-300">
+            Location IDs are <strong>namespaced strings</strong> like
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">"shop:10"</code> &mdash; not
+            raw numbers. (The <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">focus-shop-id</code>
+            attribute takes a number and prefixes it for you; the JS API does not.) Always source IDs
+            from <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">getLocations()</code> and
+            pass them straight through. Only placed locations are routable, so filter on
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">displayNodes</code>.
+          </p>
+          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">const routable = map.getLocations()
+  .filter((loc) =&gt; loc.displayNodes?.length &gt; 0 &amp;&amp; loc.levelCodes?.length &gt; 0);
+// each item: { id: "shop:10", label: "Starbucks", levelCodes: ["L3"], ... }</code></pre>
+          <p class="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs leading-relaxed text-amber-200">
+            <strong>Seed data note:</strong> the bundled <code>SGC_v001.json</code> places only 6
+            locations &mdash; five on <strong>L3</strong> (<code>shop:1</code>, <code>shop:4</code>,
+            <code>shop:7</code>, <code>shop:10</code>, <code>shop:11</code>) and one on <strong>L2</strong>
+            (<code>shop:14</code>). Routing succeeds between placed locations; other catalog entries have
+            no placement and will fail to route or focus.
+          </p>
+        </div>
+
+        <div class="mb-8">
+          <h3 class="mb-2 text-base font-semibold text-slate-200">4. Trigger a route &mdash; branch on <code class="text-sky-300">result.success</code></h3>
+          <p class="mb-3 text-sm text-slate-300">
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">navigateTo()</code> never
+            throws for an un-routable pair &mdash; it returns a result object. Check
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">success</code> and read
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">code</code> on failure. A
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">route-found</code> /
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">route-error</code> event also fires.
+          </p>
+          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">const result = map.navigateTo({ from: "shop:10", to: "shop:1", mode: "escalator", animate: true });
+if (result.success) {
+  console.log("route", result.startLocation.title, "→", result.endLocation.title, result.distance);
+} else {
+  console.warn("no route:", result.code, result.error);
+}
+
+// or just focus a single shop, no route:
+map.focusLocation("shop:4", { animate: true });</code></pre>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-4 text-xl font-semibold text-white">Methods</h2>
+        <div class="overflow-x-auto rounded-xl border border-slate-700/60">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-900/80 text-slate-300">
+              <tr><th class="px-4 py-3 font-semibold">Method</th><th class="px-4 py-3 font-semibold">Description</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800 text-slate-300">
+              <tr><td class="px-4 py-3"><code class="text-sky-300">init()</code></td><td class="px-4 py-3">Boot the engine. Auto-runs on connect when <code>data-url</code> is set; returns a Promise.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">navigateTo({ from, to, mode?, animate?, duration?, scale?, connectorConstraint?, stepFree? })</code></td><td class="px-4 py-3">Route between two location IDs. Returns a result (see below); dispatches <code>route-found</code> / <code>route-error</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">focusLocation(id, { clearRoute?, switchFloor?, animate?, duration?, scale? })</code></td><td class="px-4 py-3">Pin &amp; zoom a single location (no route). Returns <code>{ success, location, node, floor }</code>; dispatches <code>location-tap</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">clearRoute()</code></td><td class="px-4 py-3">Return to browse mode, remove route/pin. Dispatches <code>route-cleared</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">setFloor(code)</code></td><td class="px-4 py-3">Switch floor, holding zoom/pan/rotation. Dispatches <code>floor-changed</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">resetView()</code></td><td class="px-4 py-3">Reset zoom, pan, and rotation to the initial framing.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">resetRotation()</code></td><td class="px-4 py-3">Reset rotation to 0° without changing zoom/pan.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">centerOn(x, y, options?)</code></td><td class="px-4 py-3">Pan (and optionally animate/zoom) to a world coordinate.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">zoom(factor)</code></td><td class="px-4 py-3">Relative zoom about the centre &mdash; <code>1.2</code> in, <code>0.8</code> out.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">getLocations()</code></td><td class="px-4 py-3">The searchable catalog &mdash; array of location objects (<code>id</code>, <code>label</code>, <code>levelCodes</code>, <code>displayNodes</code>, &hellip;).</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">getLocation(id)</code></td><td class="px-4 py-3">Look up one location by its namespaced ID, or <code>undefined</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">getViewState()</code></td><td class="px-4 py-3">Current camera as <code>{ scale, panX, panY, rotation }</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-3 text-xs text-slate-400">
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">navigateTo()</code> returns
+          <code>{ success, startLocation, endLocation, distance, segments, transitions, startAnchor, endAnchor }</code>
+          on success, or <code>{ success: false, code, error }</code> on failure.
+        </p>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-4 text-xl font-semibold text-white">Properties</h2>
+        <div class="overflow-x-auto rounded-xl border border-slate-700/60">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-900/80 text-slate-300">
+              <tr><th class="px-4 py-3 font-semibold">Property</th><th class="px-4 py-3 font-semibold">Access</th><th class="px-4 py-3 font-semibold">Description</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800 text-slate-300">
+              <tr><td class="px-4 py-3"><code class="text-sky-300">currentFloor</code></td><td class="px-4 py-3">get / set</td><td class="px-4 py-3">Active floor code; setting it switches floor (same as <code>setFloor</code>).</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">routeMode</code></td><td class="px-4 py-3">get / set</td><td class="px-4 py-3"><code>'escalator'</code> or <code>'lift'</code> &mdash; the vertical-connector preference.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">floors</code></td><td class="px-4 py-3">get</td><td class="px-4 py-3">Array of floor codes, e.g. <code>["B2","B1","L1","L2","L3"]</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">levels</code></td><td class="px-4 py-3">get</td><td class="px-4 py-3">Array of level objects with metadata (code, name, position).</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">hasRoute</code></td><td class="px-4 py-3">get</td><td class="px-4 py-3">Whether a route is currently displayed.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">isInitialized</code></td><td class="px-4 py-3">get</td><td class="px-4 py-3">Whether <code>init()</code> has completed &mdash; gate API calls on this.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">engine</code></td><td class="px-4 py-3">get</td><td class="px-4 py-3">The internal <code>MapEngine</code> &mdash; an advanced escape hatch; prefer the methods above.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-4 text-xl font-semibold text-white">Events</h2>
+        <p class="mb-3 text-sm text-slate-300">
+          All events bubble and cross the shadow boundary (<code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">composed: true</code>).
+          Listen with <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">addEventListener</code>; read the payload from
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">event.detail</code>.
+        </p>
+        <pre class="mb-5 overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">map.addEventListener("route-found", (e) =&gt; console.log("route", e.detail));
+map.addEventListener("location-tap", (e) =&gt; console.log("tapped", e.detail.location));
+map.addEventListener("floor-changed", (e) =&gt; console.log("floor", e.detail));</code></pre>
+        <div class="overflow-x-auto rounded-xl border border-slate-700/60">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-900/80 text-slate-300">
+              <tr><th class="px-4 py-3 font-semibold">Event</th><th class="px-4 py-3 font-semibold"><code>detail</code></th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800 text-slate-300">
+              <tr><td class="px-4 py-3"><code class="text-sky-300">ready</code></td><td class="px-4 py-3">&mdash; engine initialized, API safe to call.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">error</code></td><td class="px-4 py-3"><code>{ error }</code> &mdash; init or operation failure.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">data-loaded</code></td><td class="px-4 py-3">&mdash; the bundle finished loading.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">floor-changed</code></td><td class="px-4 py-3"><code>{ floor }</code> &mdash; new floor code.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">view-changed</code></td><td class="px-4 py-3"><code>{ scale, panX, panY, rotation }</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">route-found</code></td><td class="px-4 py-3"><code>{ startLocation, endLocation, &hellip; }</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">route-error</code></td><td class="px-4 py-3"><code>{ error, from, to }</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">route-cleared</code></td><td class="px-4 py-3">&mdash; returned to browse mode.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">route-mode-changed</code></td><td class="px-4 py-3"><code>{ mode }</code> &mdash; <code>'escalator'</code> / <code>'lift'</code>.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">location-tap</code></td><td class="px-4 py-3"><code>{ location, node, floor }</code> &mdash; a unit was tapped/focused.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">floor-transition-tap</code></td><td class="px-4 py-3"><code>{ transitionId, fromFloor, toFloor }</code> &mdash; a connector bubble was tapped.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">floor-tap</code></td><td class="px-4 py-3"><code>{ floor, x, y }</code> &mdash; empty floor area.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">location-disambiguate</code></td><td class="px-4 py-3"><code>{ locations, x, y }</code> &mdash; a multi-tenant unit needs a choice.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">empty-tap</code></td><td class="px-4 py-3"><code>{ x, y }</code> &mdash; empty map area.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-4 text-xl font-semibold text-white">Minimal runnable example</h2>
+        <p class="mb-3 text-sm text-slate-300">
+          The essential wiring, without the demo&rsquo;s control-panel chrome. See
+          <a href="api.html" class="text-sky-400 hover:text-sky-300">api.html</a> for the full styled page.
+        </p>
+        <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+  &lt;head&gt;
+    &lt;meta charset="utf-8" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1,
+          maximum-scale=1, user-scalable=no" /&gt;
+    &lt;title&gt;Saigon Centre Map&lt;/title&gt;
+    &lt;style&gt;
+      html, body { margin: 0; height: 100%; overflow: hidden; }
+      wayfinder-map { display: block; width: 100vw; height: 100vh; }
+    &lt;/style&gt;
+    &lt;script type="importmap"&gt;
+      { "imports": { "qrcode-generator": "../qa-shims/qrcode-generator.js" } }
+    &lt;/script&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;wayfinder-map
+      data-url="../datas/SGC_v001.json"
+      default-floor="L3"
+      level-selector
+    &gt;&lt;/wayfinder-map&gt;
+
+    &lt;script type="module"&gt;
+      import "../dist/wayfinder-map.esm.js";
+      const map = document.querySelector("wayfinder-map");
+      map.addEventListener("error", (e) =&gt; console.error("Map error:", e.detail?.error || e));
+
+      function start() {
+        // pick two placed shops from the catalog
+        const routable = map.getLocations()
+          .filter((loc) =&gt; loc.displayNodes?.length &gt; 0);
+        if (routable.length &gt;= 2) {
+          const result = map.navigateTo({
+            from: routable[0].id,   // e.g. "shop:10"
+            to: routable[1].id,     // e.g. "shop:1"
+            animate: true,
+          });
+          if (!result.success) console.warn("no route:", result.code);
+        }
+      }
+      if (map.isInitialized) start();
+      else map.addEventListener("ready", start, { once: true });
+    &lt;/script&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</code></pre>
+      </section>
+
+      <footer class="border-t border-slate-800 pt-6 text-xs uppercase tracking-[0.25em] text-slate-500">
+        <a href="index.html" class="hover:text-slate-300">← Back to demos</a>
+      </footer>
+    </div>
+  </body>
+</html>

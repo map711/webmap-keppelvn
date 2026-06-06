@@ -35,6 +35,8 @@ try {
     'demo/bare-doc.html',
     'demo/basic.html',
     'demo/basic-doc.html',
+    'demo/api.html',
+    'demo/api-doc.html',
     'demo/level.html',
     'demo/level-doc.html',
     'demo/focus.html',

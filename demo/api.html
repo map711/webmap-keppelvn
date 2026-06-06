@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Saigon Centre — JavaScript API</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    wayfinder-map { display: block; width: 100vw; height: 100vh; }
+
+    /* Overlay control panel — drives the <wayfinder-map> JS API. */
+    .panel {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 10;
+      width: 248px;
+      max-height: calc(100vh - 24px);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 14px;
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.86);
+      color: #e2e8f0;
+      box-shadow: 0 20px 45px -25px rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(6px);
+      font-size: 13px;
+    }
+    .panel h1 { margin: 0; font-size: 14px; font-weight: 600; color: #fff; }
+    .panel p.hint { margin: 0; font-size: 11px; line-height: 1.4; color: #94a3b8; }
+    .group { display: flex; flex-direction: column; gap: 6px; }
+    .group label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; }
+    .row { display: flex; gap: 6px; }
+    .row > * { flex: 1; }
+    select, button {
+      font: inherit;
+      font-size: 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      padding: 6px 8px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #e2e8f0;
+      cursor: pointer;
+    }
+    button:hover { border-color: #38bdf8; color: #fff; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.primary { background: #0ea5e9; border-color: #0ea5e9; color: #fff; font-weight: 600; }
+    button.primary:hover { background: #38bdf8; }
+    hr { width: 100%; border: none; border-top: 1px solid rgba(148, 163, 184, 0.2); margin: 2px 0; }
+
+    /* Event log */
+    .log {
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      z-index: 10;
+      width: 248px;
+      height: 168px;
+      display: flex;
+      flex-direction: column;
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.86);
+      box-shadow: 0 20px 45px -25px rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(6px);
+      overflow: hidden;
+    }
+    .log header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #94a3b8;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .log header button { padding: 2px 8px; font-size: 11px; }
+    .log .lines {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #cbd5e1;
+    }
+    .log .lines .evt { color: #7dd3fc; }
+    .log .lines .res { color: #86efac; }
+    .log .lines .err { color: #fca5a5; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "qrcode-generator": "../qa-shims/qrcode-generator.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <wayfinder-map
+    data-url="../datas/SGC_v001.json"
+    default-floor="L3"
+    level-selector
+  ></wayfinder-map>
+
+  <!-- Control panel: every control calls one method on the element's JS API. -->
+  <div class="panel" id="panel" hidden>
+    <h1>JavaScript API</h1>
+    <p class="hint">Dropdowns list only placed (routable) locations from <code>map.getLocations()</code>. The seed bundle places 6 — five on L3, one on L2 — so same-floor routing works best on L3.</p>
+
+    <div class="group">
+      <label for="from">From</label>
+      <select id="from"></select>
+    </div>
+    <div class="group">
+      <label for="to">To</label>
+      <select id="to"></select>
+    </div>
+    <div class="group">
+      <label for="mode">Route mode</label>
+      <div class="row">
+        <select id="mode">
+          <option value="escalator">escalator</option>
+          <option value="lift">lift</option>
+        </select>
+        <button class="primary" id="navigate">Navigate</button>
+      </div>
+    </div>
+
+    <hr />
+
+    <div class="row">
+      <button id="focus">Focus “To”</button>
+      <button id="clear">Clear</button>
+    </div>
+
+    <div class="group">
+      <label for="floor">Floor</label>
+      <select id="floor"></select>
+    </div>
+
+    <div class="row">
+      <button id="zoom-in">Zoom +</button>
+      <button id="zoom-out">Zoom −</button>
+    </div>
+    <div class="row">
+      <button id="reset-view">Reset view</button>
+      <button id="reset-rot">Reset rot.</button>
+    </div>
+    <button id="view-state">Log view state</button>
+  </div>
+
+  <!-- Live event log: subscribes to every event the element dispatches. -->
+  <div class="log" id="logbox" hidden>
+    <header>
+      <span>Event log</span>
+      <button id="clear-log">clear</button>
+    </header>
+    <div class="lines" id="lines"></div>
+  </div>
+
+  <script type="module">
+    import "../dist/wayfinder-map.esm.js";
+
+    const map = document.querySelector("wayfinder-map");
+    const panel = document.getElementById("panel");
+    const logbox = document.getElementById("logbox");
+    const lines = document.getElementById("lines");
+
+    // --- event log -------------------------------------------------------
+    const append = (text, cls) => {
+      const div = document.createElement("div");
+      if (cls) div.className = cls;
+      div.textContent = text;
+      lines.appendChild(div);
+      lines.scrollTop = lines.scrollHeight;
+    };
+    const summary = (detail) => {
+      if (detail == null) return "";
+      try {
+        const seen = new Set();
+        return JSON.stringify(detail, (k, v) => {
+          if (typeof v === "object" && v !== null) {
+            if (seen.has(v)) return "[circular]";
+            seen.add(v);
+          }
+          if (typeof v === "number") return Math.round(v * 100) / 100;
+          return v;
+        }).slice(0, 160);
+      } catch {
+        return String(detail);
+      }
+    };
+
+    // Every DOM event the element dispatches — logged so the page doubles as
+    // an events demonstration.
+    const EVENTS = [
+      "ready", "error", "data-loaded", "floor-changed", "view-changed",
+      "route-found", "route-error", "route-cleared", "route-mode-changed",
+      "location-tap", "floor-transition-tap", "floor-tap",
+      "location-disambiguate", "empty-tap",
+    ];
+    for (const name of EVENTS) {
+      map.addEventListener(name, (e) => {
+        const cls = name === "error" || name === "route-error" ? "err" : "evt";
+        append(`▸ ${name} ${summary(e.detail)}`, cls);
+      });
+    }
+    map.addEventListener("error", (e) => console.error("Map error:", e.detail?.error || e));
+    document.getElementById("clear-log").addEventListener("click", () => { lines.innerHTML = ""; });
+
+    // --- wire controls once the engine is ready --------------------------
+    const setup = () => {
+      panel.hidden = false;
+      logbox.hidden = false;
+
+      const fromSel = document.getElementById("from");
+      const toSel = document.getElementById("to");
+      const floorSel = document.getElementById("floor");
+
+      // Only locations with a placement are routable/focusable.
+      const routable = map.getLocations()
+        .filter((loc) => loc.displayNodes?.length > 0 && loc.levelCodes?.length > 0);
+
+      for (const loc of routable) {
+        fromSel.add(new Option(loc.label, loc.id));
+        toSel.add(new Option(loc.label, loc.id));
+      }
+      // Default From/To to two different shops if available.
+      if (routable.length > 1) toSel.selectedIndex = 1;
+
+      for (const code of map.floors) {
+        floorSel.add(new Option(code, code));
+      }
+      floorSel.value = map.currentFloor ?? "";
+
+      // Navigate
+      document.getElementById("navigate").addEventListener("click", () => {
+        const from = fromSel.value;
+        const to = toSel.value;
+        const mode = document.getElementById("mode").value;
+        const result = map.navigateTo({ from, to, mode, animate: true });
+        if (result?.success) {
+          append(`✓ navigateTo → ${result.startLocation?.title} → ${result.endLocation?.title} (${Math.round(result.distance ?? 0)})`, "res");
+        } else {
+          append(`✗ navigateTo failed: ${result?.code ?? "?"} ${result?.error ?? ""}`, "err");
+        }
+      });
+
+      // Focus the "To" selection (no route)
+      document.getElementById("focus").addEventListener("click", () => {
+        const result = map.focusLocation(toSel.value, { animate: true });
+        if (result?.success) {
+          append(`✓ focusLocation → ${result.location?.title} (floor ${result.floor})`, "res");
+        } else {
+          append(`✗ focusLocation failed: ${result?.error ?? "?"}`, "err");
+        }
+      });
+
+      document.getElementById("clear").addEventListener("click", () => map.clearRoute());
+
+      floorSel.addEventListener("change", () => map.setFloor(floorSel.value));
+      map.addEventListener("floor-changed", () => { floorSel.value = map.currentFloor ?? ""; });
+
+      document.getElementById("zoom-in").addEventListener("click", () => map.zoom(1.2));
+      document.getElementById("zoom-out").addEventListener("click", () => map.zoom(0.8));
+      document.getElementById("reset-view").addEventListener("click", () => map.resetView());
+      document.getElementById("reset-rot").addEventListener("click", () => map.resetRotation());
+      document.getElementById("view-state").addEventListener("click", () => {
+        append(`· getViewState ${summary(map.getViewState())}`, "res");
+      });
+    };
+
+    // init() auto-runs on connect (data-url is present); wait for ready, but
+    // guard against the event having already fired.
+    if (map.isInitialized) setup();
+    else map.addEventListener("ready", setup, { once: true });
+  </script>
+</body>
+</html>
