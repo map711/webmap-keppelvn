@@ -199,6 +199,74 @@ describe('route-rendering: animated per-floor route polyline', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  // Criterion 1b — the line reaches the SHOP anchor, not just the routing door.
+  //   The navmesh path terminates at the door (corridor edge); the drawn polyline
+  //   must extend a cosmetic leg to the shop's display anchor (where the pin sits)
+  //   so the line meets the pin. Door-less units (anchor ≈ display point) get no
+  //   leg; the leg only appears when the door diverges from the shop anchor.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('criterion 1b: the polyline extends to the shop anchor (the pin), not the door', () => {
+    // A same-floor route whose anchors are snapped to DOORS that diverge from the
+    // shops' display anchors: start door (100,200) vs Shop A display (10,20);
+    // end door (140,240) vs Shop B display (50,60).
+    function makeDoorDivergentResult() {
+      return {
+        success: true,
+        startAnchor: { levelCode: 'F1', x: 100, y: 200 },
+        endAnchor: { levelCode: 'F1', x: 140, y: 240 },
+        startLocation: {
+          title: 'Shop A',
+          nodes: [],
+          displayNodes: [{ levelCode: 'F1', unitId: 301, point: { x: 10, y: 20 } }]
+        },
+        endLocation: {
+          title: 'Shop B',
+          nodes: [],
+          displayNodes: [{ levelCode: 'F1', unitId: 303, point: { x: 50, y: 60 } }]
+        },
+        segments: new Map([['F1', [[100, 200], [120, 220], [140, 240]]]]),
+        transitions: []
+      };
+    }
+
+    it('prepends the start shop anchor and appends the end shop anchor to the drawn line', () => {
+      const layer = new NavigationLayer('F1');
+      layer.setPath(makeDoorDivergentResult());
+
+      const ctx = makeRecordingCtx();
+      layer.renderWithContext({ ctx, invalidate() {} });
+
+      // The grey line now runs: start shop anchor -> door -> ...door... -> end shop anchor.
+      expect(fullPathDrawn(ctx)).toEqual([
+        [10, 20], // start shop anchor (the pin) — prepended leg
+        [100, 200], // start door (navmesh terminus)
+        [120, 220],
+        [140, 240], // end door (navmesh terminus)
+        [50, 60] // end shop anchor (the pin) — appended leg
+      ]);
+    });
+
+    it('adds NO leg when the route carries no Location metadata (anchor-only fallback)', () => {
+      const layer = new NavigationLayer('F1');
+      layer.setPath({
+        success: true,
+        startAnchor: { levelCode: 'F1', x: 100, y: 200 },
+        endAnchor: { levelCode: 'F1', x: 140, y: 240 },
+        startLocation: null,
+        endLocation: null,
+        segments: new Map([['F1', [[100, 200], [140, 240]]]]),
+        transitions: []
+      });
+
+      const ctx = makeRecordingCtx();
+      layer.renderWithContext({ ctx, invalidate() {} });
+
+      // No Location => the door endpoints are the only known points; draw them as-is.
+      expect(fullPathDrawn(ctx)).toEqual([[100, 200], [140, 240]]);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Criterion 2 — a floor NOT in segments (F0): no path, draws nothing, no throw.
   // ───────────────────────────────────────────────────────────────────────────
   describe('criterion 2: a floor absent from segments draws nothing', () => {

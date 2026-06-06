@@ -39,11 +39,65 @@ export class NavigationLayer extends Layer {
   setPath(pathResult) {
     this.#pathResult = pathResult?.success ? pathResult : null;
     this.#fullPath = NavigationLayer.flattenSegments(this.#pathResult);
+    this.#extendToShopAnchors();
     this.#filterPathForFloor();
 
     if (this.#filteredPath.length > 0) {
       this.startAnimation();
     }
+  }
+
+  /**
+   * Extend the flattened polyline so it reaches the SHOP anchor (the display
+   * node / `label_point`) at each end, matching where {@link import('./PinMarkerLayer.js').PinMarkerLayer}
+   * draws the start/end pin. The navmesh path itself terminates at the routing
+   * DOOR (a corridor-edge point); this prepends/appends the cosmetic "into the
+   * shop" leg so the line meets the pin instead of stopping at the door.
+   *
+   * Door-less units snap their anchor to the centroid (≈ the display point), so
+   * the dedup guard makes this a no-op there — the leg only appears for units
+   * that have a door (where door ≠ shop anchor). No leg is added for routes that
+   * omit Location metadata.
+   */
+  #extendToShopAnchors() {
+    const result = this.#pathResult;
+    if (!result || this.#fullPath.length === 0) return;
+
+    const startFloor = result.startAnchor?.levelCode;
+    const endFloor = result.endAnchor?.levelCode;
+    const startPt = NavigationLayer.#shopAnchorOnFloor(result.startLocation, startFloor);
+    const endPt = NavigationLayer.#shopAnchorOnFloor(result.endLocation, endFloor);
+
+    if (startPt && startFloor) {
+      const head = this.#fullPath[0];
+      if (head.level?.code === startFloor && !NavigationLayer.#samePoint(head.point, startPt)) {
+        this.#fullPath.unshift({ point: startPt, level: { code: startFloor } });
+      }
+    }
+    if (endPt && endFloor) {
+      const tail = this.#fullPath[this.#fullPath.length - 1];
+      if (tail.level?.code === endFloor && !NavigationLayer.#samePoint(tail.point, endPt)) {
+        this.#fullPath.push({ point: endPt, level: { code: endFloor } });
+      }
+    }
+  }
+
+  /**
+   * Resolve a Location's SHOP anchor on a given floor — the same point the pin
+   * uses: legacy navigation nodes (`level.code`) first, then bundle `displayNodes`
+   * (`levelCode`). Returns `{x,y}` or `null`.
+   */
+  static #shopAnchorOnFloor(location, levelCode) {
+    if (!location || !levelCode) return null;
+    const legacy = location.nodes?.find?.((n) => n.level?.code === levelCode);
+    if (legacy?.point) return { x: legacy.point.x, y: legacy.point.y };
+    const display = location.displayNodes?.find?.((n) => n.levelCode === levelCode);
+    if (display?.point) return { x: display.point.x, y: display.point.y };
+    return null;
+  }
+
+  static #samePoint(a, b) {
+    return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
   }
 
   /**

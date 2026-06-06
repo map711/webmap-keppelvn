@@ -25,9 +25,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Targets (one per acceptance criterion):
-//   1. PinMarkerLayer.setPath(routeResult): start pin draws at startAnchor.(x,y) ONLY
-//      when startAnchor.levelCode is the active floor; end pin at endAnchor.(x,y) ONLY
-//      when endAnchor.levelCode is active (verified by switching floors).
+//   1. PinMarkerLayer.setPath(routeResult): a pin draws ONLY on its anchor's active
+//      floor (verified by switching floors). With no Location metadata the pin sits
+//      at the route anchor.
+//   1b. The pin marks the SHOP, not the routing door: when a Location carries a
+//      display node on the active floor, the pin renders at that display anchor
+//      (unit centroid / label_point), NOT the snapped door anchor — the polyline
+//      still terminates at the door. Anchor is the no-Location fallback.
 //   2. NavMarkerLayer.setPath stores routeResult.transitions; departure floor active ->
 //      bubble at (transition.fromX, fromY) with an UP arrow (toOrdinal > fromOrdinal);
 //      arrival floor active -> bubble at (transition.toX, toY) with a DOWN arrow.
@@ -197,6 +201,85 @@ describe('route-markers: start/end pins + floor-transition bubbles', () => {
       layer.renderWithContext({ ctx, invalidate() {} });
 
       expect(translateAnchors(ctx)).toEqual([]);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Criterion 1b — the pin marks the SHOP, not the routing door. A route anchor
+  //   is snapped to the unit's door (on the corridor edge) so the polyline can
+  //   reach a walkable point; but the start/end PIN must sit on the shop's own
+  //   display anchor (centroid / label_point). When a Location carries a display
+  //   node on the active floor, the pin renders THERE — even though it diverges
+  //   from the route anchor. (The route polyline still terminates at the door.)
+  //   The anchor is only a fallback for routes that omit Location metadata.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('criterion 1b: the pin marks the shop display anchor, not the routing door', () => {
+    // A same-floor route whose anchors are snapped to DOORS that diverge from the
+    // shops' display anchors: door at (100,200) vs Shop A display node (10,20);
+    // door at (140,240) vs Shop B display node (50,60).
+    function makeDoorDivergentResult() {
+      return {
+        success: true,
+        startAnchor: { levelCode: 'F1', x: 100, y: 200 }, // the DOOR (corridor edge)
+        endAnchor: { levelCode: 'F1', x: 140, y: 240 }, // the DOOR (corridor edge)
+        startLocation: {
+          title: 'Shop A',
+          nodes: [],
+          displayNodes: [{ levelCode: 'F1', unitId: 301, point: { x: 10, y: 20 } }]
+        },
+        endLocation: {
+          title: 'Shop B',
+          nodes: [],
+          displayNodes: [{ levelCode: 'F1', unitId: 303, point: { x: 50, y: 60 } }]
+        },
+        segments: new Map([['F1', [[100, 200], [140, 240]]]]),
+        transitions: []
+      };
+    }
+
+    it('draws the start pin at the shop display node (10,20), NOT the door anchor (100,200)', () => {
+      const layer = new PinMarkerLayer('F1');
+      layer.setPath(makeDoorDivergentResult());
+
+      const ctx = makeRecordingCtx();
+      layer.renderWithContext({ ctx, invalidate() {} });
+
+      const anchors = translateAnchors(ctx);
+      expect(anchors).toContainEqual([10, 20]); // shop anchor (display node)
+      expect(anchors).not.toContainEqual([100, 200]); // NOT the routing door
+    });
+
+    it('draws the end pin at the shop display node (50,60), NOT the door anchor (140,240)', () => {
+      const layer = new PinMarkerLayer('F1');
+      layer.setPath(makeDoorDivergentResult());
+
+      const ctx = makeRecordingCtx();
+      layer.renderWithContext({ ctx, invalidate() {} });
+
+      const anchors = translateAnchors(ctx);
+      expect(anchors).toContainEqual([50, 60]); // shop anchor (display node)
+      expect(anchors).not.toContainEqual([140, 240]); // NOT the routing door
+    });
+
+    it('falls back to the route anchor when the Location carries no display node', () => {
+      const layer = new PinMarkerLayer('F1');
+      layer.setPath({
+        success: true,
+        startAnchor: { levelCode: 'F1', x: 100, y: 200 },
+        endAnchor: { levelCode: 'F1', x: 140, y: 240 },
+        startLocation: null, // route without catalog metadata
+        endLocation: null,
+        segments: new Map([['F1', [[100, 200], [140, 240]]]]),
+        transitions: []
+      });
+
+      const ctx = makeRecordingCtx();
+      layer.renderWithContext({ ctx, invalidate() {} });
+
+      const anchors = translateAnchors(ctx);
+      // With no Location, the anchor IS the only known position — draw there.
+      expect(anchors).toContainEqual([100, 200]);
+      expect(anchors).toContainEqual([140, 240]);
     });
   });
 

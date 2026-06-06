@@ -21,6 +21,13 @@ canvas draw; the engine frames the start floor on a successful navigation.
 - After `engine.navigateTo` success, the engine `setFloor`s to
   `startAnchor.levelCode` and `centerOn`s `(startAnchor.x, startAnchor.y)`,
   reusing the Phase-1 focus camera path.
+- **The drawn line reaches the SHOP anchor, not just the routing door.** The
+  navmesh `segments` terminate at the door (corridor edge); `setPath` extends the
+  flattened polyline with a cosmetic leg to the start/end **shop anchor** (the
+  Location display node — the same point the pin sits on), so the line meets the
+  pin. Resolved like the pin (legacy `nodes` then `displayNodes`, by floor).
+  Door-less units (anchor ≈ display point, dedup guard) get no leg; routes with
+  no Location metadata get no leg (door endpoints drawn as-is).
 
 ## Interfaces & contracts
 
@@ -30,13 +37,14 @@ canvas draw; the engine frames the start floor on a successful navigation.
 
 ## Data model
 
-- Consumes **RouteResult** (`navmesh-routing`): `segments` per floor. Owns only transient per-render animation state (RAF progress); no persistence.
+- Consumes **RouteResult** (`navmesh-routing`): `segments` per floor, plus `start/endAnchor` and `start/endLocation` (to extend the line to the shop anchor). Owns only transient per-render animation state (RAF progress); no persistence.
 
 ## Decisions & constraints
 
 - **Decision:** rebuild the animated walk (grey full path + animated black progress) over `segments`, reusing the carried-over RAF skeleton. Rejected: static-only polyline.
 - **Invariant:** the layer renders **only the active floor's** slice of `segments`; a floor absent from `segments` draws nothing (never throws).
-- **Invariant:** route segments are consumed as-is — the layer never synthesizes points or re-derives geometry.
+- **Invariant:** the navmesh `segments` are consumed as-is for the walkable path; the layer adds points ONLY as terminal shop-anchor legs (prepend start / append end) so the line meets the pin — it never re-derives the interior funnel geometry.
+- **Correction (this cycle):** the line previously stopped at the routing door, leaving a gap to the pin (which sits on the shop). Fixed by extending the polyline to the shop anchor in `setPath`. Door is for routing; the line (like the pin) reaches the shop. See `route-markers` for the matching pin fix.
 
 ## UX & accessibility
 
@@ -48,4 +56,4 @@ canvas draw; the engine frames the start floor on a successful navigation.
 
 ## Tests
 
-- `test/layers/RouteRendering.test.js` — per-floor slice equals `segments.get(floor)`, floor-not-in-segments ⇒ `hasPath()` false + no draw, `setPath`/`clearPath` animation start/stop, two-stroke draw asserted via a mock 2D context recording `moveTo`/`lineTo`, engine handoff to `startAnchor` floor + center.
+- `test/layers/RouteRendering.test.js` — per-floor slice equals `segments.get(floor)`, **line-reaches-the-shop-anchor** (door-divergent route prepends/appends the display-node leg; no leg without Location metadata), floor-not-in-segments ⇒ `hasPath()` false + no draw, `setPath`/`clearPath` animation start/stop, two-stroke draw asserted via a mock 2D context recording `moveTo`/`lineTo`, engine handoff to `startAnchor` floor + center.

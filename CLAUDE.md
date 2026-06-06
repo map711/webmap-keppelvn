@@ -34,6 +34,17 @@ Project map + decisions live in `overview.md`; per-capability records in
 - **Connector kind slug is `'elevator'`, not `'lift'`.** The real bundle's
   accessible connector is kind `elevator`; the `routeMode='lift'` toggle maps to
   it. Don't assert `'lift'` as an emitted `transition.kind`.
+- **Pin marks the SHOP, not the routing door.** `PinMarkerLayer.#resolveNode`
+  prefers the `start/endLocation` **display node** (unit centroid / `label_point`)
+  over the route `start/endAnchor` (a door snapped to the corridor edge). The
+  polyline ends at the door; the pin sits on the unit. Anchor is the no-Location
+  fallback. Door-less units snap the anchor to the centroid so the two coincide —
+  the divergence (and any "pin floats in the corridor" regression) only shows for
+  units that have a door. Don't flip `#resolveNode` back to anchor-first.
+  **The route LINE matches:** `NavigationLayer.setPath` extends the flattened
+  polyline with a terminal leg from the door to that same shop anchor (start
+  prepend / end append) so the line meets the pin — the navmesh `segments` stay
+  door-to-door for distance/funnel; only the drawn line gets the cosmetic leg.
 - **Label font is screen-space `max(minFontSize·dpr, fontSize·√scale·dpr)`**,
   applied once to `ctx.font` then counter-scaled by `1/scale` — a `minFontSize·dpr`
   FLOOR with √scale growth above it. There is **no `_fitScale` unit-shrink** (the

@@ -286,18 +286,24 @@ export class PinMarkerLayer extends Layer {
   }
 
   #resolveNode(explicitNode, location) {
+    // The pin marks the SHOP, so prefer the Location's display anchor (the unit
+    // centroid / label_point) over the route's snapped DOOR anchor. The route
+    // polyline still terminates at the door — only the marker sits on the unit.
+    // The route anchor is a fallback for routes that omit Location metadata.
+    if (location) {
+      // Legacy navigation nodes expose `level.code`.
+      const legacy = location.nodes?.find?.((n) => n.level?.code === this.#currentLevelCode);
+      if (legacy) return legacy;
+      // Bundle-built catalog Locations carry an empty `nodes` array and populate
+      // `displayNodes` instead; DisplayNodes expose `levelCode` (not `level.code`).
+      const display = location.displayNodes?.find?.((n) => n.levelCode === this.#currentLevelCode);
+      if (display) return display;
+    }
     if (explicitNode?.level?.code === this.#currentLevelCode) {
       return explicitNode;
     }
-    if (!location) return null;
-    // Legacy navigation nodes expose `level.code`.
-    const legacy = location.nodes?.find?.((n) => n.level?.code === this.#currentLevelCode);
-    if (legacy) return legacy;
-    // Bundle-built catalog Locations carry an empty `nodes` array and populate
-    // `displayNodes` instead; DisplayNodes expose `levelCode` (not `level.code`).
-    const display = location.displayNodes?.find?.((n) => n.levelCode === this.#currentLevelCode)
-      || location.displayNodes?.[0];
-    return display || null;
+    // Last resort: any display node (legacy cross-floor focus-pin behaviour).
+    return location?.displayNodes?.[0] ?? null;
   }
 
   #extractTransform(ctx) {
