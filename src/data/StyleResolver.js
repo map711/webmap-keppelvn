@@ -7,7 +7,7 @@
  * value wins. When every level under-specifies, the hard defaults apply:
  * stroke `#000`, fill `#ccc`, stroke width `1`.
  *
- * @see datas/webmap-data.md "Style cascade"
+ * @see capabilities/floor-rendering.md — the style-cascade contract.
  */
 
 const DEFAULT_STROKE_COLOR = '#000';

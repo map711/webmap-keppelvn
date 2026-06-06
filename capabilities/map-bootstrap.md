@@ -56,8 +56,9 @@ infrastructure (Rollup bundles, Vitest suite, `http-server` on port 5080).
   the raw bundle arrays (exposed unchanged so consumer-asserted counts mirror the
   served data) plus the derived lookup maps. `navmesh_by_level` is object-keyed
   by stringified level id; a meshless level is **absent**, not present-with-empty.
-- **Bundle top-level shape** — documented in `datas/webmap-data.md`; the loader
-  validates against `REQUIRED_KEYS`.
+- **Bundle top-level shape** — the loader validates the parsed bundle against
+  `REQUIRED_KEYS` (`mall`/`levels`/`units`/`shops`/`navmesh_by_level`/…); the live
+  `datas/SGC_v001.json` is the authoritative example of the produced shape.
 
 ## Decisions & constraints
 

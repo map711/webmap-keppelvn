@@ -4,7 +4,7 @@ import { DataLoader, DataLoadError } from './DataLoader.js';
  * The required top-level keys of a webmap consumer bundle. A bundle missing any
  * of these is structurally invalid and yields a {@link BundleLoadError}.
  *
- * @see datas/webmap-data.md "Top-level shape"
+ * @see datas/SGC_v001.json — the authoritative example of the produced shape.
  */
 const REQUIRED_KEYS = Object.freeze([
   'levels',
