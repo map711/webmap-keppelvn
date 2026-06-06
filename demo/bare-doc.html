@@ -46,17 +46,11 @@
           <p class="mb-3 text-sm text-slate-300">
             Load the ES module bundle. It registers the
             <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">&lt;wayfinder-map&gt;</code>
-            custom element automatically. The shipped bundle externalizes
-            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">qrcode-generator</code>
-            (a Phase-3 share dependency), so add a one-line import map pointing at the bundled QA
-            stub for local browsing. <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">rbush</code>
-            is already bundled and needs no mapping.
+            custom element automatically. Everything it needs
+            (<code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">rbush</code> included)
+            is bundled, so no import map is required.
           </p>
-          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;script type="importmap"&gt;
-  { "imports": { "qrcode-generator": "../qa-shims/qrcode-generator.js" } }
-&lt;/script&gt;
-
-&lt;script type="module"&gt;
+          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;script type="module"&gt;
   import "../dist/wayfinder-map.esm.js";
 &lt;/script&gt;</code></pre>
         </div>
@@ -121,9 +115,6 @@ map.addEventListener("error", (event) =&gt; {
       html, body { margin: 0; height: 100%; overflow: hidden; }
       wayfinder-map { display: block; width: 100vw; height: 100vh; }
     &lt;/style&gt;
-    &lt;script type="importmap"&gt;
-      { "imports": { "qrcode-generator": "../qa-shims/qrcode-generator.js" } }
-    &lt;/script&gt;
   &lt;/head&gt;
   &lt;body&gt;
     &lt;wayfinder-map

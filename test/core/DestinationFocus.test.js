@@ -441,8 +441,7 @@ function makeWiredEngineStub() {
 
 // Mount the REAL WayfinderMapElement and run its REAL init() (-> real #wireEvents)
 // over the controllable stub engine. The MapEngine constructor is doMock'd to hand
-// back our stub so #wireEvents binds to a bus we can drive; qrcode-generator (a
-// later-phase dep) is stubbed so the component module graph resolves. Returns the
+// back our stub so #wireEvents binds to a bus we can drive. Returns the
 // real element + the stub engine whose `emit` drives the forwarding under test.
 async function mountWiredComponent() {
   installComponentDom();
@@ -451,12 +450,6 @@ async function mountWiredComponent() {
   vi.resetModules();
   vi.doMock('../../src/core/MapEngine.js', () => ({
     MapEngine: class { constructor() { return __wiredEngineRef.current; } }
-  }));
-  vi.doMock('qrcode-generator', () => ({
-    default: () => ({
-      addData() {}, make() {}, createDataURL() { return ''; },
-      createSvgTag() { return ''; }, getModuleCount() { return 0; }, isDark() { return false; }
-    })
   }));
 
   let mod = null;
@@ -570,9 +563,9 @@ describe('destination-focus: tap/select a shop -> focus it (real stores + classi
 
   afterEach(() => {
     delete globalThis.HTMLCanvasElement;
-    // Tear down anything the real-component DOM harness installed and drop any
-    // per-test doMock (MapEngine/qrcode-generator) so a later real-MapEngine test
-    // imports the genuine module, not the component stub.
+    // Tear down anything the real-component DOM harness installed and drop the
+    // per-test MapEngine doMock so a later real-MapEngine test imports the genuine
+    // module, not the component stub.
     restoreComponentDom();
     __wiredEngineRef.current = null;
     vi.restoreAllMocks();

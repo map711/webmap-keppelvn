@@ -8,16 +8,6 @@
     html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
     wayfinder-map { display: block; width: 100vw; height: 100vh; }
   </style>
-  <!-- The shipped dist bundle externalizes qrcode-generator (a Phase-3 dep that
-       is not installed). The map never exercises QR here, so the QA stub satisfies
-       the import. rbush IS bundled into dist, so it needs no mapping. -->
-  <script type="importmap">
-  {
-    "imports": {
-      "qrcode-generator": "../qa-shims/qrcode-generator.js"
-    }
-  }
-  </script>
 </head>
 <body>
   <wayfinder-map

@@ -71,5 +71,5 @@ at the same time as `npm run dev` without wiping or racing the watcher's `dist/`
 `npm run deploy` builds and uploads to DigitalOcean Spaces (S3-compatible) via
 the `aws` CLI. Copy `.env.example` to `.env` and fill in `BUILD_SECRET` and the
 `DO_SPACES_*` credentials first. The deployed product is the demo gallery
-(`dist/<BUILD_SECRET>/`), the minified bundle, and the `datas/` + `qa-shims/`
-assets the gallery references.
+(`dist/<BUILD_SECRET>/`), the minified bundle, and the `datas/` assets the
+gallery references.

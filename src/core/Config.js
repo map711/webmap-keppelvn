@@ -34,7 +34,6 @@ const CONFIG_SCHEMA = {
   iconWalk: { type: 'string', default: null },
   iconStand: { type: 'string', default: null },
   iconPin: { type: 'string', default: null },
-  iconQr: { type: 'string', default: null },
   iconWheelchair: { type: 'string', default: null },
   iconEscalator: { type: 'string', default: null },
   enableRotation: { type: 'boolean', default: true },

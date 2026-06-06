@@ -56,7 +56,7 @@ Project map + decisions live in `overview.md`; per-capability records in
   then `scripts/build.js` (stages the demo gallery into `dist/<BUILD_SECRET>/`,
   rewriting `dist/wayfinder-map.esm.js` imports to `../wayfinder-map.min.js`).
   `npm run deploy` builds then `aws s3 sync`s the gallery + min bundle + `datas/`
-  + `qa-shims/` to DigitalOcean Spaces. Both read `.env` (gitignored;
+  to DigitalOcean Spaces. Both read `.env` (gitignored;
   `BUILD_SECRET` + `DO_SPACES_*`) via `dotenv`; see `.env.example`.
 - **Routing never throws** — `PathFinder.findPath` always returns a typed
   `RouteResult`; callers branch on `result.success` and read `code` on failure.

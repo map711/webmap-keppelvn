@@ -1,7 +1,5 @@
 import { MapEngine } from '../core/MapEngine.js';
-import QRCode from 'qrcode-generator';
 import { sortFloorCodesByPosition } from './controls/levelOrder.js';
-import { buildShareUrl, captureMapShareState, parseShareUrl } from './controls/deepLinkState.js';
 import { styles } from './styles.js';
 import {
   ICON_WALK,
@@ -11,7 +9,6 @@ import {
   ICON_CLOSE,
   ICON_EXPAND,
   ICON_COLLAPSE,
-  ICON_QR,
   ICON_WHEELCHAIR,
   ICON_ESCALATOR
 } from '../assets/icons.js';
@@ -24,7 +21,6 @@ const DEFAULT_ICON_SET = Object.freeze({
   close: ICON_CLOSE,
   expand: ICON_EXPAND,
   collapse: ICON_COLLAPSE,
-  qr: ICON_QR,
   wheelchair: ICON_WHEELCHAIR,
   escalator: ICON_ESCALATOR
 });
@@ -33,7 +29,6 @@ const ICON_ATTR_TO_KEY = Object.freeze({
   'icon-walk': 'walk',
   'icon-stand': 'stand',
   'icon-pin': 'pin',
-  'icon-qr': 'qr',
   'icon-wheelchair': 'wheelchair',
   'icon-escalator': 'escalator'
 });
@@ -103,7 +98,6 @@ class WayfinderMapElement extends HTMLElement {
       'icon-walk',
       'icon-stand',
       'icon-pin',
-      'icon-qr',
       'icon-wheelchair',
       'icon-escalator'
     ];
@@ -127,18 +121,9 @@ class WayfinderMapElement extends HTMLElement {
   #locateFocusButton = null;
   #locateLiftButton = null;
   #locateEscalatorButton = null;
-  #searchQrButton = null;
   #locateClickHandler = null;
   #locateUnsubRouteFound = null;
   #locateUnsubRouteCleared = null;
-  #qrModalEl = null;
-  #qrModalCodeEl = null;
-  #qrModalCopyButton = null;
-  #qrModalClickHandler = null;
-  #qrModalKeydownHandler = null;
-  #qrModalOpen = false;
-  #qrShareUrl = '';
-  #qrCopyResetTimer = null;
   #searchContainerEl = null;
   #searchPanelEl = null;
   #searchHeaderEl = null;
@@ -329,7 +314,6 @@ class WayfinderMapElement extends HTMLElement {
       case 'icon-walk':
       case 'icon-stand':
       case 'icon-pin':
-      case 'icon-qr':
       case 'icon-wheelchair':
       case 'icon-escalator':
         this.#syncIconsFromAttributes();
@@ -401,14 +385,12 @@ class WayfinderMapElement extends HTMLElement {
       this.#handleResize();
 
       this.#bindLocateControls();
-      this.#bindQrModalEvents();
       this.#setMapMode('browse');
       this.#syncLevelSelector();
       this.#syncSearchControl();
       this.#applyMarkerStyleFromAttributes();
       this.#applyInitialFocusNode();
       this.#applyInitialFocusShop();
-      this.#restoreShareStateFromUrl();
 
       this.#dispatchEvent('ready', {});
     } catch (error) {
@@ -616,42 +598,6 @@ class WayfinderMapElement extends HTMLElement {
     this.#controlRailEl.appendChild(this.#levelSelectorEl);
     container.appendChild(this.#controlRailEl);
 
-    this.#qrModalEl = document.createElement('div');
-    this.#qrModalEl.className = 'wayfinder-qr-modal';
-    this.#qrModalEl.dataset.open = 'false';
-    this.#qrModalEl.setAttribute('aria-hidden', 'true');
-
-    const qrDialog = document.createElement('div');
-    qrDialog.className = 'wayfinder-qr-dialog';
-    qrDialog.setAttribute('role', 'dialog');
-    qrDialog.setAttribute('aria-modal', 'true');
-    qrDialog.setAttribute('aria-label', 'Map sharing QR code');
-
-    const qrTitle = document.createElement('h2');
-    qrTitle.className = 'wayfinder-qr-title';
-    qrTitle.textContent = 'Bring this Map to your Phone';
-
-    const qrHint = document.createElement('p');
-    qrHint.className = 'wayfinder-qr-hint';
-    qrHint.textContent = 'Scan with your phone camera';
-
-    this.#qrModalCodeEl = document.createElement('div');
-    this.#qrModalCodeEl.className = 'wayfinder-qr-code';
-    this.#qrModalCodeEl.setAttribute('aria-hidden', 'true');
-
-    this.#qrModalCopyButton = document.createElement('button');
-    this.#qrModalCopyButton.type = 'button';
-    this.#qrModalCopyButton.className = 'wayfinder-qr-copy';
-    this.#qrModalCopyButton.dataset.action = 'copy-qr-url';
-    this.#qrModalCopyButton.textContent = 'Copy Link';
-
-    qrDialog.appendChild(qrTitle);
-    qrDialog.appendChild(qrHint);
-    qrDialog.appendChild(this.#qrModalCodeEl);
-    qrDialog.appendChild(this.#qrModalCopyButton);
-    this.#qrModalEl.appendChild(qrDialog);
-    container.appendChild(this.#qrModalEl);
-
     this.#searchContainerEl = document.createElement('div');
     this.#searchContainerEl.className = 'wayfinder-search';
     this.#searchContainerEl.dataset.enabled = 'false';
@@ -669,18 +615,6 @@ class WayfinderMapElement extends HTMLElement {
     toggleIcon.alt = '';
     toggleIcon.setAttribute('aria-hidden', 'true');
     this.#searchToggleButton.appendChild(toggleIcon);
-
-    this.#searchQrButton = document.createElement('button');
-    this.#searchQrButton.type = 'button';
-    this.#searchQrButton.className = 'wayfinder-search-share';
-    this.#searchQrButton.dataset.action = 'show-qr';
-    this.#searchQrButton.setAttribute('aria-label', 'Show share QR code');
-    const searchQrIcon = document.createElement('img');
-    searchQrIcon.src = this.#icons.qr;
-    searchQrIcon.dataset.wayfinderIcon = 'qr';
-    searchQrIcon.alt = '';
-    searchQrIcon.setAttribute('aria-hidden', 'true');
-    this.#searchQrButton.appendChild(searchQrIcon);
 
     this.#searchPanelEl = document.createElement('div');
     this.#searchPanelEl.className = 'wayfinder-search-panel';
@@ -1003,7 +937,6 @@ class WayfinderMapElement extends HTMLElement {
     this.#searchNavSummaryEl.appendChild(navSummaryClose);
 
     this.#searchContainerEl.appendChild(this.#searchToggleButton);
-    this.#searchContainerEl.appendChild(this.#searchQrButton);
     this.#searchContainerEl.appendChild(this.#searchPanelEl);
     this.#searchContainerEl.appendChild(this.#searchInfoEl);
     this.#searchContainerEl.appendChild(this.#searchNavSummaryEl);
@@ -1155,7 +1088,6 @@ class WayfinderMapElement extends HTMLElement {
     if (this.hasAttribute('icon-walk')) config.iconWalk = this.#icons.walk;
     if (this.hasAttribute('icon-stand')) config.iconStand = this.#icons.stand;
     if (this.hasAttribute('icon-pin')) config.iconPin = this.#icons.pin;
-    if (this.hasAttribute('icon-qr')) config.iconQr = this.#icons.qr;
     if (this.hasAttribute('icon-wheelchair')) config.iconWheelchair = this.#icons.wheelchair;
     if (this.hasAttribute('icon-escalator')) config.iconEscalator = this.#icons.escalator;
 
@@ -1666,344 +1598,10 @@ class WayfinderMapElement extends HTMLElement {
     }
   }
 
-  #restoreShareStateFromUrl() {
-    if (!this.#engine?.isInitialized || typeof window === 'undefined') return;
-
-    const state = parseShareUrl(window.location.href);
-    if (!state) return;
-
-    try {
-      if (state.m === 'focus') {
-        const restored = this.focusLocation(state.focus, { animate: false });
-        if (!restored?.success) return;
-      } else if (state.m === 'navigation') {
-        const restored = this.navigateTo({
-          from: state.from,
-          to: state.to,
-          animate: false
-        });
-        if (!restored?.success) return;
-      } else {
-        return;
-      }
-
-      if (state.rm) {
-        this.routeMode = state.rm;
-      }
-
-      if (state.f) {
-        const floors = this.#engine.getFloors?.() ?? [];
-        if (floors.includes(state.f)) {
-          this.setFloor(state.f);
-        }
-      }
-
-      if (state.view) {
-        this.#engine.setViewState({
-          scale: state.view.s,
-          panX: state.view.x,
-          panY: state.view.y,
-          rotation: state.view.r
-        });
-      }
-
-      this.#restoreSearchUiStateFromShare(state.ui);
-    } catch (error) {
-      console.warn('wayfinder-map: failed to restore shared state', error);
-    }
-  }
-
-  #captureSearchUiShareState() {
-    if (!this.#searchControlEnabled) return null;
-
-    return {
-      searchOpen: this.#searchOpen,
-      searchQuery: this.#searchInputEl?.value ?? this.#searchQuery ?? '',
-      selectedLocationId: this.#selectedLocationId,
-      infoExpanded: this.#isSearchInfoExpanded,
-      descriptionExpanded: this.#isSearchDescriptionExpanded,
-      searchNavMode: this.#searchNavMode,
-      navActiveField: this.#navActiveField,
-      navFromLocationId: this.#navFromLocationId,
-      navToLocationId: this.#navToLocationId,
-      navFromText: this.#searchNavFromValueEl?.value ?? '',
-      navToText: this.#searchNavToValueEl?.value ?? ''
-    };
-  }
-
-  #restoreSearchUiStateFromShare(uiState) {
-    if (!this.#searchControlEnabled || !uiState) return;
-
-    if (this.#searchInputEl && typeof uiState.searchQuery === 'string') {
-      this.#searchInputEl.value = uiState.searchQuery;
-      this.#searchQuery = uiState.searchQuery;
-    }
-
-    if (typeof uiState.selectedLocationId === 'number') {
-      const location = this.#engine?.getLocation?.(uiState.selectedLocationId);
-      if (location) {
-        this.#selectedLocationId = uiState.selectedLocationId;
-        this.#updateSearchInfo(location);
-      } else {
-        this.#selectedLocationId = null;
-      }
-    } else {
-      this.#selectedLocationId = null;
-    }
-    if (this.#searchContainerEl) {
-      this.#searchContainerEl.dataset.selected = 'false';
-    }
-
-    if (typeof uiState.descriptionExpanded === 'boolean') {
-      this.#isSearchDescriptionExpanded = uiState.descriptionExpanded;
-      if (this.#searchInfoEl) {
-        this.#searchInfoEl.dataset.descriptionExpanded = uiState.descriptionExpanded ? 'true' : 'false';
-      }
-      if (this.#searchInfoDescriptionToggleEl) {
-        this.#searchInfoDescriptionToggleEl.setAttribute('aria-expanded', uiState.descriptionExpanded ? 'true' : 'false');
-        this.#searchInfoDescriptionToggleEl.textContent = uiState.descriptionExpanded ? 'Read less' : 'Read more';
-      }
-    }
-
-    const searchNavMode = uiState.searchNavMode === true;
-    this.#searchNavMode = searchNavMode;
-    if (searchNavMode) {
-      this.#navUsesHereStart = this.#engine?.hasYouAreHere?.() ?? false;
-      this.#navActiveField = uiState.navActiveField === 'to'
-        ? 'to'
-        : (uiState.navActiveField === 'from' ? 'from' : null);
-      this.#navFromLocationId = this.#navUsesHereStart
-        ? null
-        : (Number.isFinite(uiState.navFromLocationId) ? uiState.navFromLocationId : null);
-      this.#navToLocationId = Number.isFinite(uiState.navToLocationId) ? uiState.navToLocationId : null;
-      this.#navPreSelectedLocationId = this.#selectedLocationId;
-
-      if (this.#searchContainerEl) this.#searchContainerEl.dataset.navMode = 'true';
-      if (this.#searchHeaderEl) this.#searchHeaderEl.style.display = 'none';
-      if (this.#searchNavHeaderEl) this.#searchNavHeaderEl.style.display = 'flex';
-      if (this.#searchNavFieldsEl) this.#searchNavFieldsEl.style.display = 'flex';
-
-      const fromEntry = this.#searchIndex.find((entry) => entry.id === this.#navFromLocationId);
-      const toEntry = this.#searchIndex.find((entry) => entry.id === this.#navToLocationId);
-      if (this.#searchNavFromValueEl) {
-        this.#searchNavFromValueEl.value = this.#navUsesHereStart
-          ? 'Your location'
-          : (typeof uiState.navFromText === 'string'
-          ? uiState.navFromText
-          : (fromEntry?.title ?? ''));
-      }
-      if (this.#searchNavToValueEl) {
-        this.#searchNavToValueEl.value = typeof uiState.navToText === 'string'
-          ? uiState.navToText
-          : (toEntry?.title ?? '');
-      }
-      if (this.#navUsesHereStart) {
-        this.#navActiveField = 'to';
-      }
-      this.#applyHereStartNavUiState();
-      this.#updateNavFieldStates();
-    } else {
-      this.#navActiveField = null;
-      this.#navFromLocationId = null;
-      this.#navToLocationId = null;
-      this.#navPreSelectedLocationId = null;
-      this.#navUsesHereStart = false;
-      this.#applyHereStartNavUiState();
-      if (this.#searchContainerEl) this.#searchContainerEl.dataset.navMode = 'false';
-      if (this.#searchHeaderEl) this.#searchHeaderEl.style.display = 'flex';
-      if (this.#searchNavHeaderEl) this.#searchNavHeaderEl.style.display = 'none';
-      if (this.#searchNavFieldsEl) this.#searchNavFieldsEl.style.display = 'none';
-    }
-
-    const showInfo = this.#selectedLocationId != null && this.#mapMode === 'focus' && !searchNavMode;
-    this.#setSearchInfoVisible(showInfo);
-    this.#setSearchInfoExpanded(showInfo && uiState.infoExpanded === true);
-
-    const shouldOpen = uiState.searchOpen === true;
-    this.#searchOpen = shouldOpen;
-    if (this.#searchContainerEl) {
-      this.#searchContainerEl.dataset.open = shouldOpen ? 'true' : 'false';
-    }
-    if (!shouldOpen) {
-      this.#searchInputEl?.blur();
-    }
-
-    if (searchNavMode) {
-      if (shouldOpen && this.#navActiveField === 'to') {
-        this.#searchNavToValueEl?.focus();
-      } else if (shouldOpen) {
-        this.#searchNavFromValueEl?.focus();
-      }
-      if (this.#navActiveField != null || shouldOpen) {
-        this.#showNavFilteredResults();
-      } else {
-        this.#hideSearchResults();
-      }
-    } else {
-      if (shouldOpen) {
-        this.#handleSearchInput();
-      } else {
-        this.#hideSearchResults();
-        this.#updateClearButtonVisibility();
-      }
-    }
-
-    this.#updateNavSummary();
-    this.#updateLevelSelectorMaxHeight();
-  }
-
-  #buildShareState() {
-    return captureMapShareState({
-      mode: this.#mapMode,
-      currentFloor: this.#engine?.getCurrentFloor?.() ?? null,
-      routeMode: this.routeMode,
-      focusedLocationId: this.#focusedLocationId,
-      startLocationId: this.#startLocationId,
-      endLocationId: this.#endLocationId,
-      viewState: this.getViewState(),
-      searchUiState: this.#captureSearchUiShareState()
-    });
-  }
-
-  #showShareQrModal() {
-    if (!this.#engine?.isInitialized || typeof window === 'undefined') return;
-
-    const state = this.#buildShareState();
-    if (!state) return;
-
-    const shareUrl = buildShareUrl(window.location.href, state);
-    if (!shareUrl) return;
-
-    try {
-      const qr = QRCode(0, 'M');
-      qr.addData(shareUrl, 'Byte');
-      qr.make();
-      const qrSvg = qr.createSvgTag({ cellSize: 7, margin: 2, scalable: true });
-      this.#openQrModal(qrSvg, shareUrl);
-    } catch (error) {
-      console.warn('wayfinder-map: failed to generate qr code', error);
-    }
-  }
-
-  #openQrModal(qrSvg, shareUrl) {
-    if (!this.#qrModalEl || !this.#qrModalCodeEl || !this.#qrModalCopyButton) return;
-
-    this.#qrModalCodeEl.innerHTML = qrSvg;
-    this.#qrShareUrl = shareUrl;
-    this.#qrModalCopyButton.textContent = 'Copy Link';
-    this.#qrModalEl.dataset.open = 'true';
-    this.#qrModalEl.setAttribute('aria-hidden', 'false');
-    this.#qrModalOpen = true;
-
-    if (!this.#qrModalKeydownHandler) {
-      this.#qrModalKeydownHandler = (event) => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        this.#closeQrModal();
-      };
-      document.addEventListener('keydown', this.#qrModalKeydownHandler);
-    }
-
-    this.#qrModalCopyButton.focus();
-  }
-
-  #closeQrModal() {
-    if (!this.#qrModalEl || !this.#qrModalCodeEl || !this.#qrModalCopyButton) return;
-    if (!this.#qrModalOpen && this.#qrModalEl.dataset.open !== 'true') return;
-
-    this.#qrModalEl.dataset.open = 'false';
-    this.#qrModalEl.setAttribute('aria-hidden', 'true');
-    this.#qrModalCodeEl.innerHTML = '';
-    this.#qrModalCopyButton.textContent = 'Copy Link';
-    this.#qrModalOpen = false;
-    this.#qrShareUrl = '';
-
-    if (this.#qrCopyResetTimer) {
-      clearTimeout(this.#qrCopyResetTimer);
-      this.#qrCopyResetTimer = null;
-    }
-
-    if (this.#qrModalKeydownHandler) {
-      document.removeEventListener('keydown', this.#qrModalKeydownHandler);
-      this.#qrModalKeydownHandler = null;
-    }
-  }
-
-  async #copyQrShareUrl() {
-    if (!this.#qrShareUrl || !this.#qrModalCopyButton) return;
-
-    const text = this.#qrShareUrl;
-    let copied = false;
-
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        copied = true;
-      }
-    } catch {
-      copied = false;
-    }
-
-    if (!copied && typeof document !== 'undefined' && document.body) {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        copied = document.execCommand('copy');
-      } catch {
-        copied = false;
-      } finally {
-        document.body.removeChild(textarea);
-      }
-    }
-
-    this.#qrModalCopyButton.textContent = copied ? 'Copied' : 'Copy failed';
-    if (this.#qrCopyResetTimer) clearTimeout(this.#qrCopyResetTimer);
-    this.#qrCopyResetTimer = setTimeout(() => {
-      if (this.#qrModalCopyButton && this.#qrModalOpen) {
-        this.#qrModalCopyButton.textContent = 'Copy Link';
-      }
-      this.#qrCopyResetTimer = null;
-    }, 1200);
-  }
-
-  #bindQrModalEvents() {
-    if (!this.#qrModalEl || this.#qrModalClickHandler) return;
-
-    this.#qrModalClickHandler = (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-
-      const actionButton = target.closest('button');
-      if (actionButton?.dataset.action === 'copy-qr-url') {
-        void this.#copyQrShareUrl();
-        return;
-      }
-
-      if (target === this.#qrModalEl) {
-        this.#closeQrModal();
-      }
-    };
-
-    this.#qrModalEl.addEventListener('click', this.#qrModalClickHandler);
-  }
-
-  #unbindQrModalEvents() {
-    if (!this.#qrModalEl || !this.#qrModalClickHandler) return;
-    this.#qrModalEl.removeEventListener('click', this.#qrModalClickHandler);
-    this.#qrModalClickHandler = null;
-  }
-
   #cleanup() {
     this.#disableLevelSelector();
     this.#disableSearchControl();
     this.#unbindLocateControls();
-    this.#closeQrModal();
-    this.#unbindQrModalEvents();
     this.#cleanupViewportInsetTracking();
     if (this.#resizeObserver) {
       this.#resizeObserver.disconnect();
@@ -2975,10 +2573,6 @@ class WayfinderMapElement extends HTMLElement {
     }
     if (action === 'close-search') {
       this.#closeSearchOverlay();
-      return;
-    }
-    if (action === 'show-qr') {
-      this.#showShareQrModal();
       return;
     }
     if (action === 'clear-search') {

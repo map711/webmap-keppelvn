@@ -470,16 +470,6 @@ vi.mock('../../src/core/MapEngine.js', () => ({
   }
 }));
 
-// `qrcode-generator` is a Phase-3 (qr-share) dependency not declared/installed in
-// this phase; the component imports it at module load. Stub it so the module graph
-// resolves — search does not exercise QR. (Mirrors qa-shims/qrcode-generator.js.)
-vi.mock('qrcode-generator', () => ({
-  default: () => ({
-    addData() {}, make() {}, createDataURL() { return ''; },
-    createSvgTag() { return ''; }, getModuleCount() { return 0; }, isDark() { return false; }
-  })
-}));
-
 // The result-button titles the component currently renders (criterion 1/3 obs).
 function renderedResultTitles(results) {
   return results.children

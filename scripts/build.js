@@ -53,8 +53,8 @@ try {
     // Rewrite import paths from ./dist/... or ../dist/... to ../wayfinder-map.min.js.
     // The gallery lands under <secret>/, so the bundle one level up (../) maps to
     // the bucket-root wayfinder-map.min.js that deploy.js uploads. The demos'
-    // ../datas/ and ../qa-shims/ refs resolve the same way (deploy uploads those
-    // dirs to the bucket root too).
+    // ../datas/ refs resolve the same way (deploy uploads that dir to the bucket
+    // root too).
     content = content.replace(
       /(?:\.\.\/|\.\/)dist\/wayfinder-map\.esm\.js/g,
       '../wayfinder-map.min.js'

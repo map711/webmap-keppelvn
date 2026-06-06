@@ -124,15 +124,6 @@ vi.mock('../../src/layers/PinMarkerLayer.js', () => ({
   }
 }));
 
-// qrcode-generator is a later-phase dep imported at component module load; stub
-// so the module graph resolves (search-to-route does not exercise QR).
-vi.mock('qrcode-generator', () => ({
-  default: () => ({
-    addData() {}, make() {}, createDataURL() { return ''; },
-    createSvgTag() { return ''; }, getModuleCount() { return 0; }, isDark() { return false; }
-  })
-}));
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal DOM shim (same model the destination-search / -focus suites use).
 // ─────────────────────────────────────────────────────────────────────────────

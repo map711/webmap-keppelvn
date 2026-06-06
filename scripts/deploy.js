@@ -56,18 +56,6 @@ run(
   ` --delete`
 );
 
-// Upload the qrcode-generator shim the gallery's importmap points at
-// (../qa-shims/qrcode-generator.js — qrcode is a not-yet-installed Phase-3 dep
-// the shipped bundle externalizes).
-console.log(`\nSyncing qa-shims/ to s3://${DO_SPACES_BUCKET}/qa-shims/ ...`);
-run(
-  `aws s3 sync "qa-shims/" "s3://${DO_SPACES_BUCKET}/qa-shims/"` +
-  ` --endpoint-url "${ENDPOINT}"` +
-  ` --acl public-read` +
-  ` --cache-control "public, max-age=0"` +
-  ` --delete`
-);
-
 // Upload minified JS
 console.log('\nUploading wayfinder-map.min.js...');
 run(

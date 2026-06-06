@@ -50,9 +50,8 @@
         <div class="mb-8">
           <h3 class="mb-2 text-base font-semibold text-slate-200">1. Import and grab the element</h3>
           <p class="mb-3 text-sm text-slate-300">
-            Same import boilerplate as every demo: an import map for
-            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">qrcode-generator</code> plus
-            the module import that registers the custom element.
+            Same import boilerplate as every demo: a single module import that registers the
+            custom element.
           </p>
           <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;wayfinder-map data-url="../datas/SGC_v001.json" default-floor="L3" level-selector&gt;&lt;/wayfinder-map&gt;
 
@@ -227,9 +226,6 @@ map.addEventListener("floor-changed", (e) =&gt; console.log("floor", e.detail));
       html, body { margin: 0; height: 100%; overflow: hidden; }
       wayfinder-map { display: block; width: 100vw; height: 100vh; }
     &lt;/style&gt;
-    &lt;script type="importmap"&gt;
-      { "imports": { "qrcode-generator": "../qa-shims/qrcode-generator.js" } }
-    &lt;/script&gt;
   &lt;/head&gt;
   &lt;body&gt;
     &lt;wayfinder-map

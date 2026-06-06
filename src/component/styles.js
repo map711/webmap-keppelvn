@@ -171,92 +171,6 @@ export const styles = `
     outline-offset: 2px;
   }
 
-  .wayfinder-qr-modal {
-    position: absolute;
-    inset: 0;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    background: rgba(15, 23, 42, 0.52);
-    z-index: 5;
-    padding: 16px;
-    pointer-events: auto;
-    opacity: 0;
-    transition: opacity 180ms ease;
-  }
-
-  .wayfinder-qr-modal[data-open='true'] {
-    display: flex;
-    opacity: 1;
-  }
-
-  .wayfinder-qr-dialog {
-    position: relative;
-    width: min(360px, calc(100vw - 32px));
-    border-radius: 20px;
-    border: 1px solid rgba(15, 23, 42, 0.16);
-    background: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 24px 56px -36px rgba(15, 23, 42, 0.85);
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    align-items: center;
-    text-align: center;
-    color: #0f172a;
-  }
-
-  .wayfinder-qr-title {
-    margin: 0;
-    font-size: 19px;
-    line-height: 1.25;
-    font-weight: 700;
-  }
-
-  .wayfinder-qr-hint {
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.4;
-    color: rgba(15, 23, 42, 0.72);
-  }
-
-  .wayfinder-qr-code {
-    align-self: center;
-    width: min(280px, calc(100vw - 96px));
-    border-radius: 14px;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    background: #ffffff;
-    padding: 10px;
-    box-sizing: border-box;
-  }
-
-  .wayfinder-qr-code svg {
-    width: 100%;
-    height: auto;
-    display: block;
-  }
-
-  .wayfinder-qr-copy {
-    width: 100%;
-    min-height: 42px;
-    border-radius: 12px;
-    border: 1px solid rgba(15, 23, 42, 0.2);
-    background: rgba(15, 23, 42, 0.04);
-    color: #0f172a;
-    font: 600 14px/1.2 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    cursor: pointer;
-    transition: background 120ms ease, border-color 120ms ease;
-  }
-
-  .wayfinder-qr-copy:hover {
-    background: rgba(15, 23, 42, 0.08);
-  }
-
-  .wayfinder-qr-copy:focus-visible {
-    outline: 2px solid rgba(14, 116, 144, 0.7);
-    outline-offset: 2px;
-  }
-
   .wayfinder-level-button[data-active='true'] {
     background: var(--wayfinder-control-button-bg-active);
     color: var(--wayfinder-control-icon-active-color);
@@ -310,39 +224,6 @@ export const styles = `
     height: 20px;
     display: block;
     filter: none;
-  }
-
-  .wayfinder-search-share {
-    position: absolute;
-    top: var(--wayfinder-search-top-offset);
-    left: calc(16px + var(--wayfinder-search-panel-width) + 8px);
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    border: 1px solid rgba(15, 23, 42, 0.2);
-    background: var(--wayfinder-control-button-bg);
-    box-shadow: 0 6px 18px -12px rgba(15, 23, 42, 0.5);
-    display: none;
-    place-items: center;
-    cursor: pointer;
-    pointer-events: auto;
-  }
-
-  .wayfinder-search-share img {
-    width: 20px;
-    height: 20px;
-    display: block;
-    filter: none;
-  }
-
-  .wayfinder-search[data-enabled='true'][data-mode='focus'] .wayfinder-search-share,
-  .wayfinder-search[data-enabled='true'][data-mode='navigation'] .wayfinder-search-share {
-    display: grid;
-  }
-
-  .wayfinder-search-share:focus-visible {
-    outline: 2px solid rgba(14, 116, 144, 0.7);
-    outline-offset: 2px;
   }
 
   .wayfinder-search-panel {
@@ -769,23 +650,8 @@ export const styles = `
   }
 
   @media (max-width: 768px) {
-    .wayfinder-qr-dialog {
-      width: calc(100vw - 24px);
-      border-radius: 18px;
-      padding: 18px;
-    }
-
-    .wayfinder-qr-code {
-      width: min(300px, calc(100vw - 72px));
-    }
-
     .wayfinder-search-toggle {
       display: grid;
-    }
-
-    .wayfinder-search-share {
-      top: 16px;
-      left: 68px;
     }
 
     .wayfinder-search-panel {
@@ -826,10 +692,6 @@ export const styles = `
     }
 
     .wayfinder-search[data-open='true'][data-selected='true'] .wayfinder-search-selected {
-      display: none;
-    }
-
-    .wayfinder-search[data-open='true'] .wayfinder-search-share {
       display: none;
     }
 
@@ -1183,10 +1045,6 @@ export const styles = `
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .wayfinder-qr-modal {
-      transition: none;
-    }
-
     .wayfinder-search-info {
       transition: none;
     }

@@ -36,7 +36,7 @@ dev-server harness on port 5010, and a gallery build + DigitalOcean-Spaces deplo
   `scripts/build.js`, which stages the demo gallery into `dist/<BUILD_SECRET>/`
   (rewriting each page's `dist/wayfinder-map.esm.js` import to
   `../wayfinder-map.min.js`). `npm run deploy` builds then `aws s3 sync`s the
-  gallery + `wayfinder-map.min.js` + `datas/` + `qa-shims/` to DigitalOcean
+  gallery + `wayfinder-map.min.js` + `datas/` to DigitalOcean
   Spaces. Both read `.env` (gitignored — `BUILD_SECRET` + `DO_SPACES_*`) via
   `dotenv`; `BUILD_SECRET` is validated `^[\w.-]+$` so it can't escape `dist/`.
 - `npm test` runs Vitest (`vitest run`), which **binds no port** (fetch mocked,
