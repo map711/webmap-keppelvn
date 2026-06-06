@@ -7,9 +7,9 @@
 ## Product intent
 
 A standalone, browser-first indoor wayfinding map for **Saigon Centre (SGC)** — a
-Keppel mall — shipped as a `<wayfinder-map>` Web Component. It is a **port**: the
-product *shell* of `webmap-sunwaymalls` (a polished Canvas-2D component + UI +
-build) is forked, but its data/render guts are replaced with logic ported from
+Keppel mall — shipped as a `<wayfinder-map>` Web Component. The product *shell*
+(a polished Canvas-2D component + UI + build) provides the rendering and UI
+scaffolding, but its data/render guts are replaced with logic ported from
 the `indoorcms-keppelvn` CMS so the engine can consume the CMS's published bundle
 `datas/SGC_v001.json` (GeoJSON-polygon units in raw coordinates + a navmesh +
 cross-floor transitions). The CMS is the *producer* of the bundle; this webmap is
@@ -24,7 +24,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 
 | Capability | Does | Record |
 |------------|------|--------|
-| `map-bootstrap` | Fork the shell; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test/dev on :5080 | `capabilities/map-bootstrap.md` |
+| `map-bootstrap` | Fork the shell; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test + ownership-aware dev harness on :5080 + gallery build/deploy | `capabilities/map-bootstrap.md` |
 | `destination-catalog` | `LocationStore` builds the placed-shop + facility destination catalog (multi-tenant/multi-unit aware; one-to-many `unitId→Location`) | `capabilities/destination-catalog.md` |
 | `floor-rendering` `(ui)` | Unit-aware `FloorLayer`: per-unit polygons, `unit→layer→kind` style cascade, `getBounds()` fallback, `hitTest→unitId` | `capabilities/floor-rendering.md` |
 | `map-labels` `(ui)` | `LocationLayer` draws labelable-unit labels at `label_point`/`label_rotation`, zoom-responsive screen-space font (`max(minFontSize·dpr, fontSize·√scale·dpr)`) + cached overlap suppression with zoom-freeze/idle-recompute | `capabilities/map-labels.md` |
@@ -52,7 +52,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 
 ## Decisions
 
-- **Reuse-first port** — keep the sunwaymalls Canvas-2D renderer + component
+- **Reuse-first port** — keep the Canvas-2D renderer + component
   shell, replace store/layer internals in place; rejected a Konva swap and a new
   `WayfinderEngine.js` (both re-plumb proven, working code).
 - **Single self-contained bundle** — one `data-url`; rejected keeping `map-url`
@@ -92,6 +92,8 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `src/navigation/` | Navmesh routing: triangle-A*, funnel string-pull, graph builder, route planner + state | `NavGraph.js`, `TriangleAStar.js`, `FunnelPath.js`, `PathFinder.js`, `RouteManager.js` |
 | `test/` | Vitest node-env suite + `fixtures/SGC_v001.json` real bundle | per-capability `*.test.js` |
 | `demo/` | Static showcase pages for the Phase-1 browse capabilities (bare / default-controls / `focus-shop-id` / theme) + per-demo guide | `index.html` |
+| `.dev/` | Zero-dep ownership-aware dev-server harness (human vs agent owner, live-reload, `$PORT`/config) | `server.mjs`, `ensure.mjs`, `stop.mjs` |
+| `scripts/` | One-shot build (Rollup + stage gallery into `dist/<BUILD_SECRET>/`) and deploy (`aws s3 sync` → DigitalOcean Spaces) | `build.js`, `deploy.js` |
 
 ## Key patterns
 
@@ -172,7 +174,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 
 (Inherited from `tars-epic.md`'s cross-cutting decisions.)
 
-- **Canvas-2D renderer + component shell** (sunwaymalls) — rejected Konva swap.
+- **Canvas-2D renderer + component shell** — rejected Konva swap.
 - **Single bundle, one `data-url`** → `SGC_v001.json` — rejected `map-url` split.
 - **Raw CMS coords, `renderScale = 1`** — rejected 0–1 normalization (FP drift,
   ambiguous for meshless L1).
@@ -185,18 +187,20 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
   (zig-zags; not the indoorcms behavior).
 - **Soft connector penalty + hard step-free gate** — rejected hard-filter by kind
   (returns *no route* on a single-connector floor).
-- **Build:** Rollup → ESM/UMD/min. **Test:** Vitest node-env, pure ports driven
-  by a synthetic mini-bundle; the real 2 MB bundle only in opt-in smoke tests.
-  **Dev/run:** port 5080.
+- **Build:** Rollup → ESM/UMD/min, then `scripts/build.js` stages the demo
+  gallery into `dist/<BUILD_SECRET>/`. **Deploy:** `scripts/deploy.js` →
+  DigitalOcean Spaces (`.env`-driven). **Test:** Vitest node-env, pure ports
+  driven by a synthetic mini-bundle; the real 2 MB bundle only in opt-in smoke
+  tests; the suite binds no port. **Dev/run:** ownership-aware `.dev/` harness on
+  port 5080 (`$PORT`-overridable) — won't kill a human's `npm run dev`.
 
 ## UI/UX patterns
 
 ### Design system & tokens
 - **Stack:** vanilla Web Component (`<wayfinder-map>`) over a Canvas-2D render
-  stack; built-in search + level-selector controls forked from sunwaymalls; SVG
+  stack; built-in search + level-selector controls; SVG
   icon set under `src/assets/`.
-- **Visual reference:** match the `webmap-sunwaymalls` look-and-feel (the fork
-  source) while rendering SGC's real geometry with indoorcms fidelity — clean,
+- **Visual reference:** render SGC's real geometry with indoorcms fidelity — clean,
   calm indoor-mall map; the floor geometry is the hero, chrome minimal.
 - **Colors:** unit fills come from the `unit→layer→kind` style cascade (per-kind
   fill, subtle strokes); label background is a light translucent halo for

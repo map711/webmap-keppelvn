@@ -29,7 +29,35 @@ Project map + decisions live in `overview.md`; per-capability records in
   meshless **and** unit-less. Assert data-driven *rules* against the real
   `SGC_v001.json`; put concrete counts in the synthetic **mini-bundle** fixture.
 - **Tests:** Vitest node-env; pure ports tested via mini-bundle, real 2 MB bundle
-  only in opt-in smoke tests. Dev/run on **port 5080**.
+  only in opt-in smoke tests. **No test binds a port** — fetch is mocked / fixtures
+  read from disk; only `buildInfra.test.js` shells out, to run the real `rollup`.
+- **Never run `npm run dev` from an agent/QA path — use `npm run dev:ensure`.**
+  The dev server is the ownership-aware `.dev/` harness (zero-dep node server).
+  `npm run dev` = `owner=human` (what the user leaves running; serves :5080,
+  live-reload, spawns `rollup -c -w`). `dev:ensure` reuses a running server or
+  starts a detached `owner=agent` one; `dev:stop` **refuses to stop a human
+  server** without `--force`; a later `npm run dev` reclaims an agent-held port.
+  This is the "don't kill my `npm run dev`" guarantee — don't reintroduce a path
+  that binds :5080 directly or SIGTERMs by port. The harness recognises its own
+  servers via `/__dev/health` (sentinel `keppelvn-dev`); a foreign process on
+  :5080 makes it fail fast, not kill.
+- **Dev/run on port 5080, overridable via `$PORT`** (or `.dev/config.json`).
+  Override so a second fork — or a server already holding 5080 — coexists:
+  `PORT=5081 npm run dev`. `resolvePort()` reads `$PORT` over config.
+- **`npm test` must never touch the dev server's `dist/`.** A live `npm run dev`
+  owns `dist/` (`rollup -w` writes it, the harness serves it). The build-infra
+  gate therefore builds into an **isolated temp dir** via `WAYFINDER_BUILD_OUT_DIR`
+  (rollup reads it; default `dist`) and asserts a sentinel in `dist/` survives —
+  so `vitest run` (and every `tars:run` iteration) can run alongside `npm run dev`
+  without `rm -rf`-ing the dir the watcher is mid-write on and racing a second
+  rollup over the same files (the "my `npm run dev` got killed" bug). Don't revert
+  the build test to `rmSync(dist) + rollup -c`.
+- **Build & deploy.** `npm run build` = `rollup -c` (the three `dist/` bundles)
+  then `scripts/build.js` (stages the demo gallery into `dist/<BUILD_SECRET>/`,
+  rewriting `dist/wayfinder-map.esm.js` imports to `../wayfinder-map.min.js`).
+  `npm run deploy` builds then `aws s3 sync`s the gallery + min bundle + `datas/`
+  + `qa-shims/` to DigitalOcean Spaces. Both read `.env` (gitignored;
+  `BUILD_SECRET` + `DO_SPACES_*`) via `dotenv`; see `.env.example`.
 - **Routing never throws** — `PathFinder.findPath` always returns a typed
   `RouteResult`; callers branch on `result.success` and read `code` on failure.
   Route consumers read per-floor `segments`/`anchors`/`transitions`; never

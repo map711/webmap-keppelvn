@@ -6,3 +6,13 @@ dist/
 
 # QA verification scratch (browser screenshots from /tars:run)
 .qa-*.png
+
+# Isolated dev worktrees
+.worktrees/
+
+# Deploy secrets (DigitalOcean Spaces credentials + BUILD_SECRET)
+.env
+
+# Dev-harness runtime state (per-machine; not source)
+.dev/dev.json
+.dev/agent-server.log

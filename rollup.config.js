@@ -27,11 +27,19 @@ const { base: basePlugins, terser } = await loadPlugins();
 
 const input = 'src/index.js';
 
+// Output dir defaults to dist/ (what `npm run build` and `dev:watch` ship). The
+// build-infra test overrides it via WAYFINDER_BUILD_OUT_DIR to build into an
+// isolated temp dir, so `vitest run` never deletes/rewrites the dist/ a running
+// `npm run dev` is live-serving on :5080. Keep the default literally 'dist' so the
+// structural contract test (which introspects this config without the env) still
+// sees every output land under dist/.
+const outDir = process.env.WAYFINDER_BUILD_OUT_DIR || 'dist';
+
 export default [
   {
     input,
     output: {
-      file: 'dist/wayfinder-map.esm.js',
+      file: `${outDir}/wayfinder-map.esm.js`,
       format: 'esm',
       sourcemap: true
     },
@@ -40,7 +48,7 @@ export default [
   {
     input,
     output: {
-      file: 'dist/wayfinder-map.umd.js',
+      file: `${outDir}/wayfinder-map.umd.js`,
       format: 'umd',
       name: 'WayfinderMap',
       sourcemap: true
@@ -50,7 +58,7 @@ export default [
   {
     input,
     output: {
-      file: 'dist/wayfinder-map.min.js',
+      file: `${outDir}/wayfinder-map.min.js`,
       format: 'umd',
       name: 'WayfinderMap',
       sourcemap: false

@@ -3,11 +3,12 @@
 ## Purpose
 
 Stand up the standalone `<wayfinder-map>` app for Saigon Centre by forking the
-`webmap-sunwaymalls` Canvas-2D shell and feeding it the single CMS bundle
+upstream Canvas-2D shell and feeding it the single CMS bundle
 `datas/SGC_v001.json`. This capability is the foundation every other Phase-1
 capability builds on: one `data-url` fetch → parse → index of the self-contained
-bundle, engine initialization over the indexed model, and the build/test/dev
-infrastructure (Rollup bundles, Vitest suite, `http-server` on port 5080).
+bundle, engine initialization over the indexed model, and the build/test/dev/
+deploy infrastructure (Rollup bundles, Vitest suite, an ownership-aware `.dev/`
+dev-server harness on port 5080, and a gallery build + DigitalOcean-Spaces deploy).
 
 ## Behavior
 
@@ -31,9 +32,25 @@ infrastructure (Rollup bundles, Vitest suite, `http-server` on port 5080).
   both stores hydrate from the **already-parsed** indexed model (no second
   fetch) and the engine emits `data:loaded` with `floorCount === 5`. The
   component re-emits this as the `data-loaded` DOM event.
-- `npm run build` (Rollup) emits ESM + UMD + min bundles to `dist/`; `npm test`
-  runs Vitest; `npm run dev` runs `rollup -w` + `http-server -p 5080`
-  concurrently.
+- `npm run build` = `rollup -c` (ESM + UMD + min bundles to `dist/`) then
+  `scripts/build.js`, which stages the demo gallery into `dist/<BUILD_SECRET>/`
+  (rewriting each page's `dist/wayfinder-map.esm.js` import to
+  `../wayfinder-map.min.js`). `npm run deploy` builds then `aws s3 sync`s the
+  gallery + `wayfinder-map.min.js` + `datas/` + `qa-shims/` to DigitalOcean
+  Spaces. Both read `.env` (gitignored — `BUILD_SECRET` + `DO_SPACES_*`) via
+  `dotenv`; `BUILD_SECRET` is validated `^[\w.-]+$` so it can't escape `dist/`.
+- `npm test` runs Vitest (`vitest run`), which **binds no port** (fetch mocked,
+  fixtures read from disk) — so it never collides with a live dev server.
+- The dev server is the zero-dependency **ownership-aware `.dev/` harness**, not
+  `http-server`. `npm run dev` starts an `owner=human` server on :5080 (static
+  serve + live-reload injection + a spawned `rollup -c -w`) — what the user leaves
+  running. Automated paths use `npm run dev:ensure`, which reuses a running server
+  or starts a detached `owner=agent` one; `npm run dev:stop` refuses to stop a
+  human server without `--force`; a later `npm run dev` reclaims an agent-held
+  port. The harness recognises its own servers via `/__dev/health` (sentinel
+  `keppelvn-dev`); a foreign process on :5080 makes it fail fast, never kill.
+  Port is 5080 by default, overridable via `$PORT` (read over `.dev/config.json`
+  by `resolvePort()`).
 
 ## Interfaces & contracts
 
@@ -77,6 +94,16 @@ infrastructure (Rollup bundles, Vitest suite, `http-server` on port 5080).
   function of the served data; indexes are derived, never authoritative).
 - **Invariant:** a structurally invalid bundle yields a `BundleLoadError` /
   emitted error event, never an unhandled throw.
+- **Decision:** the dev server is an ownership-aware `.dev/` harness (human vs
+  agent owner) rather than a bare `http-server` — rejected: a plain port-bound
+  dev script that an agent/QA path could SIGTERM, killing the user's running
+  `npm run dev` (the "don't kill my dev server" guarantee).
+- **Decision:** the build-infra test builds into an isolated temp dir via
+  `WAYFINDER_BUILD_OUT_DIR` (rollup reads it; default `dist`) and asserts a
+  `dist/` sentinel survives — rejected: `rmSync(dist) + rollup -c`, which races a
+  live `rollup -w` mid-write on the dir the harness is serving on :5080.
+- **Invariant:** `npm test` never touches a live dev server's `dist/`; the test
+  suite binds no port.
 
 ## Tests
 
@@ -85,5 +112,11 @@ infrastructure (Rollup bundles, Vitest suite, `http-server` on port 5080).
   counts, missing-key structured error.
 - `test/core/MapEngine.bootstrap.test.js` — single `data-url` fetch (no
   `map-url`), `data:loaded` with `floorCount===5`.
-- `test/build/buildInfra.test.js` — build emits 3 bundles; dev script binds
-  `-p 5080`; test script runs Vitest.
+- `test/build/buildInfra.test.js` — `build` runs rollup **and** stages the
+  gallery; `test` runs Vitest; `dev`/`dev:ensure`/`dev:stop`/`dev:status` wire the
+  ownership-aware harness; `deploy` wires `scripts/deploy.js`; the harness ships
+  all its `.dev/` modules; `config.json` pins 5080 and `resolvePort()` honours
+  `$PORT` (no port binding); `dev:stop` refuses a human server without `--force`;
+  live-reload injection is idempotent; `rollup.config.js` emits ESM + UMD + min;
+  and a real `rollup` build into a temp `WAYFINDER_BUILD_OUT_DIR` emits non-empty
+  bundles while a `dist/` sentinel stays untouched.
