@@ -420,10 +420,10 @@ class WayfinderMapElement extends HTMLElement {
 
   /**
    * Enter navigation mode: display route between two locations.
-   * @param {{from: number, to: number, mode?: 'escalator'|'lift', animate?: boolean, duration?: number, scale?: number, connectorConstraint?: 'lift-only'|'escalator-only'|null}} options
+   * @param {{from: number, to: number, mode?: 'escalator'|'lift', animate?: boolean, duration?: number, scale?: number, connectorConstraint?: 'lift-only'|'escalator-only'|null, stepFree?: boolean}} options
    * @returns {Object} Path result
    */
-  navigateTo({ from, to, mode, animate, duration, scale, connectorConstraint }) {
+  navigateTo({ from, to, mode, animate, duration, scale, connectorConstraint, stepFree }) {
     if (!this.#engine?.isInitialized) {
       throw new Error('wayfinder-map: Not initialized');
     }
@@ -432,7 +432,7 @@ class WayfinderMapElement extends HTMLElement {
       this.routeMode = mode;
     }
 
-    const result = this.#engine.navigateTo(from, to, { animate, duration, scale, connectorConstraint });
+    const result = this.#engine.navigateTo(from, to, { animate, duration, scale, connectorConstraint, stepFree });
     if (result?.success) {
       this.#startLocationId = result.startLocation?.id ?? null;
       this.#endLocationId = result.endLocation?.id ?? null;
@@ -1517,6 +1517,7 @@ class WayfinderMapElement extends HTMLElement {
       'view:changed': 'view-changed',
       'route:found': 'route-found',
       'route:cleared': 'route-cleared',
+      'route:error': 'route-error',
       'route:modeChanged': 'route-mode-changed',
       'data:loaded': 'data-loaded',
       'tap:floor-transition': 'floor-transition-tap',

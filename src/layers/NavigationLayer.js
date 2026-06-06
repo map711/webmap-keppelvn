@@ -38,12 +38,36 @@ export class NavigationLayer extends Layer {
    */
   setPath(pathResult) {
     this.#pathResult = pathResult?.success ? pathResult : null;
-    this.#fullPath = this.#pathResult?.path || [];
+    this.#fullPath = NavigationLayer.flattenSegments(this.#pathResult);
     this.#filterPathForFloor();
 
     if (this.#filteredPath.length > 0) {
       this.startAnimation();
     }
+  }
+
+  /**
+   * Flatten a navmesh {@link import('../navigation/PathFinder.js').PathFinder}
+   * result's per-floor `segments` (`Map<levelCode, [x,y][]>`) into the flat
+   * `{point:{x,y}, level:{code}}` node list this layer's draw/animation paths
+   * consume. Returns `[]` for a failed/empty result.
+   * @param {Object|null} result
+   * @returns {Array<{point:{x:number,y:number}, level:{code:string}}>}
+   */
+  static flattenSegments(result) {
+    if (!result?.success) return [];
+    const segs = result.segments;
+    if (!segs) return [];
+    const entries = segs instanceof Map ? [...segs.entries()] : Object.entries(segs);
+    const out = [];
+    for (const [levelCode, poly] of entries) {
+      for (const p of poly || []) {
+        const x = Array.isArray(p) ? p[0] : p.x;
+        const y = Array.isArray(p) ? p[1] : p.y;
+        out.push({ point: { x, y }, level: { code: levelCode } });
+      }
+    }
+    return out;
   }
 
   /**

@@ -1,5 +1,11 @@
 /**
- * RouteManager handles route state, lifecycle, and events.
+ * RouteManager — thin route state, lifecycle, and events over the navmesh
+ * {@link import('./PathFinder.js').PathFinder} result.
+ *
+ * A successful route carries per-floor `segments` (a `Map<levelCode, [x,y][]>`),
+ * the ordered floor-change `transitions`, the summed `distance`, and the snapped
+ * `startAnchor`/`endAnchor`. The manager re-emits these on the bus
+ * (`route:found` / `route:cleared` / `route:error`) without re-deriving geometry.
  */
 export class RouteManager {
   #pathFinder;
@@ -32,68 +38,75 @@ export class RouteManager {
   }
 
   /**
-   * Find and set a route between two locations.
-   * @param {number} startLocationId
-   * @param {number} endLocationId
+   * Find and set a route between two catalog destination ids.
+   * @param {string} startLocationId
+   * @param {string} endLocationId
    * @param {Object} [options]
    * @returns {Object}
    */
   navigateTo(startLocationId, endLocationId, options = {}) {
     const result = this.#pathFinder.findPath(startLocationId, endLocationId, options);
-
-    if (result.success) {
-      this.#currentRoute = result;
-      this.#eventBus.emit('route:found', {
-        path: result.path,
-        distance: result.distance,
-        levelDistance: result.levelDistance,
-        startLocation: result.startLocation,
-        endLocation: result.endLocation,
-        startNode: result.startNode,
-        endNode: result.endNode
-      });
-    } else {
-      this.#eventBus.emit('route:error', {
-        error: result.error,
-        startLocationId,
-        endLocationId
-      });
-    }
-
+    this.#dispatch(result, { fromId: startLocationId, toId: endLocationId });
     return result;
   }
 
   /**
-   * Find and set a route from a raw node to a location.
-   * Used when routing from a non-location node (e.g. "You are here").
-   * @param {import('../data/LocationModel.js').Node} startNode
-   * @param {number} endLocationId
-   * @param {Object} [options]
+   * Find and set a route from a catalog id to a raw connector/unit anchor.
+   * @param {string} startLocationId
+   * @param {{levelCode:string, unitId:(number|string)}} target
    * @returns {Object}
    */
-  navigateFromNode(startNode, endLocationId, options = {}) {
-    const result = this.#pathFinder.findPathFromNode(startNode, endLocationId, options);
+  navigateToAnchor(startLocationId, target) {
+    const result = this.#pathFinder.findPathToAnchor(startLocationId, target);
+    this.#dispatch(result, { fromId: startLocationId, target });
+    return result;
+  }
 
+  /**
+   * Route from a raw "you are here" node. Deferred to a later phase: the
+   * navmesh router snaps catalog ids, not free nodes, so this reports an error
+   * rather than crashing if invoked early.
+   * @param {Object} startNode
+   * @param {string} endLocationId
+   * @returns {Object}
+   */
+  navigateFromNode(startNode, endLocationId) {
+    const result = {
+      success: false,
+      code: 'unsupported-start',
+      error: 'Routing from a free node is not supported in this phase',
+      segments: new Map(),
+      transitions: [],
+      distance: 0,
+      startAnchor: null,
+      endAnchor: null
+    };
+    this.#eventBus.emit('route:error', {
+      error: result.error,
+      code: result.code,
+      startNodeId: startNode?.id,
+      endLocationId
+    });
+    return result;
+  }
+
+  #dispatch(result, context) {
     if (result.success) {
       this.#currentRoute = result;
       this.#eventBus.emit('route:found', {
-        path: result.path,
+        segments: result.segments,
+        transitions: result.transitions,
         distance: result.distance,
-        levelDistance: result.levelDistance,
-        startLocation: result.startLocation,
-        endLocation: result.endLocation,
-        startNode: result.startNode,
-        endNode: result.endNode
+        startAnchor: result.startAnchor,
+        endAnchor: result.endAnchor
       });
     } else {
       this.#eventBus.emit('route:error', {
         error: result.error,
-        startNodeId: startNode?.id,
-        endLocationId
+        code: result.code,
+        ...context
       });
     }
-
-    return result;
   }
 
   /**
@@ -107,7 +120,7 @@ export class RouteManager {
   }
 
   /**
-   * Set the preferred connector mode.
+   * Set the preferred connector mode (re-routes the active route if it changes).
    * @param {'escalator'|'lift'} mode
    */
   setRouteMode(mode) {
@@ -115,15 +128,6 @@ export class RouteManager {
     this.#pathFinder.setRouteMode(mode);
     const effectiveMode = this.#pathFinder.getRouteMode();
     const changed = effectiveMode !== previousMode;
-
-    if (changed && this.#currentRoute?.success) {
-      const { startLocation, endLocation, startNode } = this.#currentRoute;
-      if (startLocation) {
-        this.navigateTo(startLocation.id, endLocation.id);
-      } else if (startNode) {
-        this.navigateFromNode(startNode, endLocation.id);
-      }
-    }
 
     this.#eventBus.emit('route:modeChanged', {
       mode: effectiveMode,
@@ -141,64 +145,46 @@ export class RouteManager {
   }
 
   /**
-   * Get path nodes for a specific floor.
+   * The per-floor polyline of the active route on a given floor (world `[x,y]`).
    * @param {string} floorCode
-   * @returns {Array}
+   * @returns {Array<[number,number]>}
    */
   getPathOnFloor(floorCode) {
     if (!this.#currentRoute?.success) return [];
-
-    return this.#currentRoute.path.filter((node) =>
-      node.level?.code === floorCode
-    );
+    const segs = this.#currentRoute.segments;
+    if (segs instanceof Map) return segs.get(floorCode) || [];
+    return (segs && segs[floorCode]) || [];
   }
 
   /**
-   * Get floors that the current route passes through.
+   * Floor codes the active route passes through, in travel order.
    * @returns {string[]}
    */
   getRouteFloors() {
     if (!this.#currentRoute?.success) return [];
-
     const floors = [];
-    let lastFloor = null;
-
-    for (const node of this.#currentRoute.path) {
-      const floorCode = node.level?.code;
-      if (floorCode && floorCode !== lastFloor) {
-        floors.push(floorCode);
-        lastFloor = floorCode;
-      }
+    if (this.#currentRoute.startAnchor?.levelCode) {
+      floors.push(this.#currentRoute.startAnchor.levelCode);
     }
-
+    for (const t of this.#currentRoute.transitions || []) {
+      if (t.toLevelCode && !floors.includes(t.toLevelCode)) floors.push(t.toLevelCode);
+    }
+    if (
+      this.#currentRoute.endAnchor?.levelCode &&
+      !floors.includes(this.#currentRoute.endAnchor.levelCode)
+    ) {
+      floors.push(this.#currentRoute.endAnchor.levelCode);
+    }
     return floors;
   }
 
   /**
-   * Get transition points (where floor changes).
-   * @returns {Array<{node: Object, fromFloor: string, toFloor: string, index: number}>}
+   * The ordered floor-change steps of the active route.
+   * @returns {Array}
    */
   getFloorTransitions() {
     if (!this.#currentRoute?.success) return [];
-
-    const transitions = [];
-    const path = this.#currentRoute.path;
-
-    for (let i = 0; i < path.length - 1; i++) {
-      const current = path[i];
-      const next = path[i + 1];
-
-      if (current.level?.code !== next.level?.code) {
-        transitions.push({
-          node: next,
-          fromFloor: current.level?.code,
-          toFloor: next.level?.code,
-          index: i + 1
-        });
-      }
-    }
-
-    return transitions;
+    return this.#currentRoute.transitions || [];
   }
 
   /**

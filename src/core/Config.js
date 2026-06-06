@@ -6,7 +6,14 @@ const CONFIG_SCHEMA = {
   mapUrl: { type: 'string', required: false },
 
   // Rendering
-  renderScale: { type: 'number', default: 1500, responsive: true },
+  // The bundle authors all geometry — unit polygons, navmesh, label points — in
+  // one raw world-coordinate space, so the catalog must NOT be rescaled relative
+  // to the mesh (default 1 = identity). A non-1 default (a holdover from the
+  // forked shell's normalized coords) throws labels/pins/focus anchors into a
+  // different space than the floor, so focusing a shop pans the camera off the
+  // mesh and the floor renders blank. Hosts whose data IS normalized can still
+  // override via the `render-scale` attribute.
+  renderScale: { type: 'number', default: 1, responsive: true },
   maxZoom: { type: 'number', default: 2.5, responsive: true },
   minZoom: { type: 'number|string', default: 'fit', responsive: true },
   labelFontSize: { type: 'number', default: 5, responsive: true },

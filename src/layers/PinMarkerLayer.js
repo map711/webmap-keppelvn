@@ -90,11 +90,25 @@ export class PinMarkerLayer extends Layer {
   setPath(pathResult) {
     const ok = pathResult?.success;
     this.#pathResult = ok ? pathResult : null;
-    this.#startLocation = ok ? pathResult.startLocation : null;
-    this.#endLocation = ok ? pathResult.endLocation : null;
-    this.#startNode = ok ? pathResult.startNode : null;
-    this.#endNode = ok ? pathResult.endNode : null;
+    this.#startLocation = ok ? (pathResult.startLocation ?? null) : null;
+    this.#endLocation = ok ? (pathResult.endLocation ?? null) : null;
+    // Build start/end marker nodes from the snapped anchors of the navmesh
+    // result (`{levelCode, x, y}`), in the `{point, level}` shape the marker
+    // renderer/resolver consume.
+    this.#startNode = ok ? PinMarkerLayer.nodeFromAnchor(pathResult.startAnchor) : null;
+    this.#endNode = ok ? PinMarkerLayer.nodeFromAnchor(pathResult.endAnchor) : null;
     this.#manualEndLocation = null;
+  }
+
+  /**
+   * Convert a route anchor (`{levelCode, x, y}`) into a `{point, level}` marker
+   * node, or `null` when the anchor is absent.
+   * @param {{levelCode:string, x:number, y:number}|null|undefined} anchor
+   * @returns {{point:{x:number,y:number}, level:{code:string}}|null}
+   */
+  static nodeFromAnchor(anchor) {
+    if (!anchor || typeof anchor.x !== 'number' || typeof anchor.y !== 'number') return null;
+    return { point: { x: anchor.x, y: anchor.y }, level: { code: anchor.levelCode } };
   }
 
   /**
@@ -338,11 +352,16 @@ export class PinMarkerLayer extends Layer {
   }
 
   #renderEndMarker(ctx, node, scale, rotation) {
-    if (!this.#endLocation) return;
-
     const worldX = node.point.x;
     const worldY = node.point.y;
-    const label = this.#endLocation.title || this.#endLocation.label || 'Destination';
+    // Render gates purely on `node` matching the active floor (resolved in
+    // renderWithContext). The end Location is optional metadata for the caption
+    // only — a route result carries the destination anchor but may omit the
+    // Location, so source the label defensively and still draw the pin.
+    const label = this.#endLocation?.title
+      || this.#endLocation?.label
+      || this.#pathResult?.endName
+      || 'Destination';
 
     const textWidth = this.#measureText(ctx, label);
     const textHeight = this.#geom.endFontSize * 1.2;

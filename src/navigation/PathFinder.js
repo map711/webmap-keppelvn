@@ -1,32 +1,66 @@
-import { MinHeap } from './MinHeap.js';
+import { triangleAStar, findNearestTriangle } from './TriangleAStar.js';
+import { funnelPath } from './FunnelPath.js';
 
 /**
- * A* pathfinder with vertical connector preferences.
+ * Failure codes carried on a non-success {@link RouteResult}. The router never
+ * throws — callers branch on `result.success` and may read `result.code`.
+ */
+export const RouteError = Object.freeze({
+  // Destination-resolution failures (the typed-failure contract). A destination
+  // that cannot be routed to carries exactly one of these — the router never
+  // throws and callers branch on `result.success` / `result.code`.
+  UNKNOWN_DESTINATION: 'UNKNOWN_DESTINATION', // id is not in the catalog
+  MESHLESS_LEVEL: 'MESHLESS_LEVEL',           // resolves to a level with NO navmesh
+  SNAP_FAILED: 'SNAP_FAILED',                 // meshed level, but no door/centroid to snap to
+  // Planning failures.
+  NO_MESH: 'no-mesh',
+  NO_PATH: 'no-path',
+  NO_TRANSITION: 'no-transition'
+});
+
+function dist(ax, ay, bx, by) {
+  return Math.hypot(ax - bx, ay - by);
+}
+
+function polylineLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += dist(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1]);
+  }
+  return total;
+}
+
+/**
+ * The navmesh-aware route planner.
+ *
+ * `findPath(startId, endId)` resolves both destination ids to a snapped anchor
+ * (level + world point + nearest triangle), runs triangle A* + funnel string-pull
+ * per floor, and stitches floors via the cheapest connector group — returning a
+ * typed {@link RouteResult}:
+ *
+ *   {
+ *     success: boolean,
+ *     segments: Map<levelCode, [x,y][]>,   // per-floor polylines
+ *     transitions: RouteTransitionStep[],  // floor-change steps (from/to)
+ *     distance: number,                    // summed polyline length
+ *     startAnchor: { levelCode, x, y },
+ *     endAnchor:   { levelCode, x, y },
+ *     code?: string                        // failure code when !success
+ *   }
  */
 export class PathFinder {
-  static PREFERRED_PENALTY = 0;
-  static NON_PREFERRED_PENALTY = 100;
-  static CROSS_LEVEL_BASE_PENALTY = 200;
-
+  #navGraph;
   #locationStore;
   #routeMode = 'escalator';
-  #cache = new Map();
-  #rawLocationsMap = new Map();
+  #stepFree = false;
 
   /**
+   * @param {{levelGraphs: Map, transitions: Array}} navGraph
    * @param {import('../data/LocationModel.js').LocationStore} locationStore
    */
-  constructor(locationStore) {
+  constructor(navGraph, locationStore) {
+    this.#navGraph = navGraph ?? { levelGraphs: new Map(), transitions: [] };
     this.#locationStore = locationStore;
-    this.#buildRawLocationsMap();
-  }
-
-  #buildRawLocationsMap() {
-    for (const node of this.#locationStore.nodes) {
-      if (node.location && typeof node.location === 'object') {
-        this.#rawLocationsMap.set(node.location.id, node.location);
-      }
-    }
   }
 
   /**
@@ -35,359 +69,449 @@ export class PathFinder {
    */
   setRouteMode(mode) {
     const normalized = (mode || '').toLowerCase();
-    if (normalized !== 'escalator' && normalized !== 'lift') {
-      console.warn(`PathFinder: invalid route mode "${mode}", keeping "${this.#routeMode}"`);
-      return;
-    }
+    if (normalized !== 'escalator' && normalized !== 'lift') return;
     if (this.#routeMode !== normalized) {
       this.#routeMode = normalized;
-      this.#cache.clear();
     }
   }
 
-  /**
-   * Get current route mode.
-   * @returns {'escalator'|'lift'}
-   */
+  /** @returns {'escalator'|'lift'} */
   getRouteMode() {
     return this.#routeMode;
   }
 
   /**
-   * Find shortest path between two locations.
-   * @param {number} startLocationId
-   * @param {number} endLocationId
-   * @param {{avoidNodeIds?: number[], connectorConstraint?: 'lift-only'|'escalator-only'|null}} [options]
-   * @returns {Object}
+   * Set the step-free (accessible-only) hard gate. When true, only
+   * `is_accessible` connector groups may be used; inaccessible connectors are
+   * gated to Infinity (never used). Symmetric with {@link setRouteMode} so a
+   * stateful caller can flip it and re-`findPath` for a fresh answer.
+   * @param {boolean} value
    */
-  findPath(startLocationId, endLocationId, options = {}) {
-    const startLocation = this.#locationStore.getLocation(startLocationId);
-    if (!startLocation) {
-      return this.#errorResult(`Start location ${startLocationId} not found`);
-    }
+  setStepFree(value) {
+    this.#stepFree = !!value;
+  }
 
-    const endLocation = this.#locationStore.getLocation(endLocationId);
-    if (!endLocation) {
-      return this.#errorResult(`End location ${endLocationId} not found`);
-    }
-
-    const startNodes = startLocation.nodes || [];
-    const endNodes = endLocation.nodes || [];
-    const startLabel = startLocation.title || startLocation.label;
-    const endLabel = endLocation.title || endLocation.label;
-
-    if (!startNodes.length) {
-      return this.#errorResult(`Start location "${startLabel}" has no navigation nodes`);
-    }
-    if (!endNodes.length) {
-      return this.#errorResult(`End location "${endLabel}" has no navigation nodes`);
-    }
-
-    const cacheKey = this.#buildCacheKey(startLocationId, endLocationId, options);
-    if (this.#cache.has(cacheKey)) {
-      return this.#cache.get(cacheKey);
-    }
-
-    const best = this.#searchNodePairs(startNodes, endNodes, options);
-
-    if (!best) {
-      return this.#errorResult(
-        `No path found between "${startLabel}" and "${endLabel}"`
-      );
-    }
-
-    const result = {
-      success: true,
-      path: best.path,
-      distance: best.distance,
-      levelDistance: best.levelDistance,
-      startLocation,
-      endLocation,
-      startNode: best.startNode,
-      endNode: best.endNode
-    };
-
-    this.#cache.set(cacheKey, result);
-    return result;
+  /** @returns {boolean} */
+  getStepFree() {
+    return this.#stepFree;
   }
 
   /**
-   * Find shortest path from a raw node to a location.
-   * Used when routing from a non-location node (e.g. "You are here").
-   * @param {import('../data/LocationModel.js').Node} startNode
-   * @param {number} endLocationId
-   * @param {{avoidNodeIds?: number[], connectorConstraint?: 'lift-only'|'escalator-only'|null}} [options]
-   * @returns {Object}
-   */
-  findPathFromNode(startNode, endLocationId, options = {}) {
-    if (!startNode) {
-      return this.#errorResult('Start node not provided');
-    }
-
-    const endLocation = this.#locationStore.getLocation(endLocationId);
-    if (!endLocation) {
-      return this.#errorResult(`End location ${endLocationId} not found`);
-    }
-
-    const endNodes = endLocation.nodes || [];
-    if (!endNodes.length) {
-      return this.#errorResult(
-        `End location "${endLocation.title || endLocation.label}" has no navigation nodes`
-      );
-    }
-
-    const best = this.#searchNodePairs([startNode], endNodes, options);
-    if (!best) {
-      return this.#errorResult(
-        `No path found from node ${startNode.id} to "${endLocation.title || endLocation.label}"`
-      );
-    }
-
-    return {
-      success: true,
-      path: best.path,
-      distance: best.distance,
-      levelDistance: best.levelDistance,
-      startLocation: null,
-      endLocation,
-      startNode: best.startNode,
-      endNode: best.endNode
-    };
-  }
-
-  /**
-   * Clear the path cache.
+   * Lifecycle hook retained for RouteManager/engine callers.
+   * Routes are not memoised in this phase, so this is a safe no-op.
    */
   clearCache() {
-    this.#cache.clear();
+    // no-op: routes are not memoised in this phase
   }
 
-  #astar(startNode, endNode, options = {}) {
-    if (!startNode || !endNode) {
-      return { success: false, path: [], distance: 0, levelDistance: 0 };
+  /**
+   * Plan a route between two catalog destination ids.
+   * @param {string} startId
+   * @param {string} endId
+   * @param {{stepFree?: boolean}} [options] - per-call overrides; `stepFree`
+   *   applies the accessible-only hard gate for this call (falls back to the
+   *   stateful {@link setStepFree} value when omitted).
+   * @returns {Object} RouteResult
+   */
+  findPath(startId, endId, options = {}) {
+    const start = this.#resolveDestination(startId);
+    if (!start.anchor) return this.#fail(start.code, start.message);
+    const end = this.#resolveDestination(endId);
+    if (!end.anchor) return this.#fail(end.code, end.message);
+
+    return this.#planBetweenAnchors(start.anchor, end.anchor, this.#resolveOptions(options), {
+      startLocation: start.location ?? null,
+      endLocation: end.location ?? null
+    });
+  }
+
+  /**
+   * Resolve effective routing preferences for one call:
+   *   - `stepFree` — a per-call value overrides the stateful flag; a HARD
+   *     accessibility gate (only `is_accessible` connectors are usable).
+   *   - `connectorConstraint` — a per-call HARD kind gate that pins the vertical
+   *     connector to exactly one kind (`'lift-only'` => elevator, `'escalator-only'`
+   *     => escalator). Distinct from the SOFT `routeMode` preference: a constraint
+   *     forbids the non-matching kind outright, so a `'lift-only'` request can
+   *     never fall back to the cheaper escalator. `null`/absent means unconstrained.
+   * @param {{stepFree?: boolean, connectorConstraint?: ('lift-only'|'escalator-only'|null)}} options
+   * @returns {{stepFree: boolean, connectorKind: (string|null)}}
+   */
+  #resolveOptions(options = {}) {
+    const stepFree = options.stepFree != null ? !!options.stepFree : this.#stepFree;
+    const connectorKind = this.#constraintToKind(options.connectorConstraint);
+    return { stepFree, connectorKind };
+  }
+
+  /**
+   * Map a UI connector constraint to the catalog connector kind slug it pins to.
+   * @param {('lift-only'|'escalator-only'|null|undefined)} constraint
+   * @returns {string|null} the required connector kind, or null when unconstrained
+   */
+  #constraintToKind(constraint) {
+    if (constraint === 'lift-only') return 'elevator';
+    if (constraint === 'escalator-only') return 'escalator';
+    return null;
+  }
+
+  /**
+   * Plan a route from a catalog destination id to a raw connector/unit anchor
+   * (level code + unit id). Used to reach a placement that is not a catalog
+   * Location — e.g. an unoccupied-floor connector member.
+   * @param {string} startId
+   * @param {{levelCode:string, unitId:(number|string)}} target
+   * @returns {Object} RouteResult
+   */
+  findPathToAnchor(startId, target, options = {}) {
+    const start = this.#resolveDestination(startId);
+    if (!start.anchor) return this.#fail(start.code, start.message);
+
+    const endAnchor = this.#anchorForUnit(target?.levelCode, target?.unitId);
+    if (!endAnchor) {
+      const code = this.#navGraph.levelGraphs.has(target?.levelCode)
+        ? RouteError.SNAP_FAILED
+        : RouteError.MESHLESS_LEVEL;
+      return this.#fail(code, `Anchor unit ${target?.unitId} not snappable on ${target?.levelCode}`);
     }
 
-    if (startNode.id === endNode.id) {
-      return {
+    return this.#planBetweenAnchors(start.anchor, endAnchor, this.#resolveOptions(options), {
+      startLocation: start.location ?? null,
+      endLocation: null
+    });
+  }
+
+  // ---- Planning -----------------------------------------------------------
+
+  #planBetweenAnchors(startAnchor, endAnchor, options = { stepFree: false, connectorKind: null }, locations = {}) {
+    // Carry the resolved catalog Locations onto every success result so callers
+    // (PinMarkerLayer) can title the start/end pins. The pins themselves are
+    // gated on the anchors, not on these — they are optional metadata.
+    const withLocations = (result) =>
+      result && result.success
+        ? { ...result, startLocation: locations.startLocation ?? null, endLocation: locations.endLocation ?? null }
+        : result;
+
+    // Degenerate: same point => single-point segment, distance 0.
+    if (
+      startAnchor.levelCode === endAnchor.levelCode &&
+      startAnchor.x === endAnchor.x &&
+      startAnchor.y === endAnchor.y
+    ) {
+      const segments = new Map();
+      segments.set(startAnchor.levelCode, [[startAnchor.x, startAnchor.y]]);
+      return withLocations({
         success: true,
-        path: [startNode],
+        segments,
+        transitions: [],
         distance: 0,
-        levelDistance: 0,
-        weightedCost: 0
+        startAnchor: this.#anchorView(startAnchor),
+        endAnchor: this.#anchorView(endAnchor)
+      });
+    }
+
+    if (startAnchor.levelCode === endAnchor.levelCode) {
+      return withLocations(this.#planSameFloor(startAnchor, endAnchor));
+    }
+    return withLocations(this.#planCrossFloor(startAnchor, endAnchor, options));
+  }
+
+  #planSameFloor(startAnchor, endAnchor) {
+    const graph = this.#navGraph.levelGraphs.get(startAnchor.levelCode);
+    const mesh = graph?.navmesh;
+    if (!mesh) return this.#fail(RouteError.NO_MESH, `Level ${startAnchor.levelCode} has no mesh`);
+
+    const poly = this.#floorPolyline(mesh, startAnchor, endAnchor);
+    if (!poly) return this.#fail(RouteError.NO_PATH, 'No triangle path on floor');
+
+    const segments = new Map();
+    segments.set(startAnchor.levelCode, poly);
+    return {
+      success: true,
+      segments,
+      transitions: [],
+      distance: polylineLength(poly),
+      startAnchor: this.#anchorView(startAnchor),
+      endAnchor: this.#anchorView(endAnchor)
+    };
+  }
+
+  #planCrossFloor(startAnchor, endAnchor, options = { stepFree: false, connectorKind: null }) {
+    const candidates = this.#connectorsBetween(startAnchor.levelCode, endAnchor.levelCode);
+    if (!candidates.length) {
+      return this.#fail(RouteError.NO_TRANSITION, `No connector between ${startAnchor.levelCode} and ${endAnchor.levelCode}`);
+    }
+
+    let best = null;
+    for (const transition of candidates) {
+      // Step-free is a HARD gate: an inaccessible connector is gated to Infinity
+      // (never used). When step-free is requested and the group is not
+      // accessible, skip it entirely so it cannot leak into the result.
+      if (options.stepFree && !this.#isAccessible(transition)) continue;
+
+      // connectorConstraint is a HARD kind gate (distinct from the soft routeMode
+      // penalty): pin the vertical connector to exactly the requested kind, so a
+      // 'lift-only' request can never fall back to the cheaper escalator.
+      if (options.connectorKind && transition.kind !== options.connectorKind) continue;
+
+      const plan = this.#planViaConnector(startAnchor, endAnchor, transition);
+      if (!plan) continue;
+      const score = plan.distance + this.#connectorPenalty(transition);
+      if (!best || score < best.score) {
+        best = { ...plan, score };
+      }
+    }
+
+    // With every candidate gated out (or none routable) there is no path.
+    if (!best) return this.#fail(RouteError.NO_PATH, 'No cross-floor path');
+    return best.result;
+  }
+
+  #planViaConnector(startAnchor, endAnchor, transition) {
+    const fromMember = transition.memberOnLevel(startAnchor.levelCode);
+    const toMember = transition.memberOnLevel(endAnchor.levelCode);
+    if (!fromMember || !toMember) return null;
+
+    const startGraph = this.#navGraph.levelGraphs.get(startAnchor.levelCode);
+    const endGraph = this.#navGraph.levelGraphs.get(endAnchor.levelCode);
+    const startMesh = startGraph?.navmesh;
+    const endMesh = endGraph?.navmesh;
+    if (!startMesh || !endMesh) return null;
+
+    const fromConn = this.#snapPoint(startMesh, fromMember.x, fromMember.y);
+    const toConn = this.#snapPoint(endMesh, toMember.x, toMember.y);
+    if (!fromConn || !toConn) return null;
+
+    const startSeg = this.#floorPolyline(startMesh, startAnchor, fromConn);
+    const endSeg = this.#floorPolyline(endMesh, toConn, endAnchor);
+    if (!startSeg || !endSeg) return null;
+
+    const segments = new Map();
+    segments.set(startAnchor.levelCode, startSeg);
+    segments.set(endAnchor.levelCode, endSeg);
+
+    const distance = polylineLength(startSeg) + polylineLength(endSeg);
+
+    const step = {
+      kind: transition.kind,
+      fromLevelCode: startAnchor.levelCode,
+      toLevelCode: endAnchor.levelCode,
+      levelCodes: [startAnchor.levelCode, endAnchor.levelCode],
+      from: { x: fromMember.x, y: fromMember.y },
+      to: { x: toMember.x, y: toMember.y },
+      // Flat connector coordinates the NavMarkerLayer draws the transition
+      // bubble at directly (the per-floor `segments` endpoints can diverge from
+      // the connector point, so the bubble must use the connector's own coords).
+      fromX: fromMember.x,
+      fromY: fromMember.y,
+      toX: toMember.x,
+      toY: toMember.y,
+      cost: transition.cost,
+      is_accessible: this.#isAccessible(transition)
+    };
+
+    return {
+      distance,
+      result: {
+        success: true,
+        segments,
+        transitions: [step],
+        distance,
+        startAnchor: this.#anchorView(startAnchor),
+        endAnchor: this.#anchorView(endAnchor)
+      }
+    };
+  }
+
+  /**
+   * Triangle A* + funnel between two snapped anchors on the SAME mesh.
+   * Returns a `[x,y][]` polyline, or `null` when no triangle path exists.
+   */
+  #floorPolyline(mesh, fromAnchor, toAnchor) {
+    const triPath = triangleAStar(mesh, fromAnchor.triIndex, toAnchor.triIndex);
+    if (!triPath.length) return null;
+    const poly = funnelPath(
+      triPath,
+      mesh,
+      { x: fromAnchor.x, y: fromAnchor.y },
+      { x: toAnchor.x, y: toAnchor.y }
+    );
+    return poly.map((p) => [p.x, p.y]);
+  }
+
+  // ---- Destination resolution (typed-failure contract) --------------------
+
+  /**
+   * Resolve a catalog destination id to a snapped anchor, OR to a typed failure
+   * code (the router never throws). The three failure codes are distinct and
+   * checked in precedence order:
+   *
+   *   - {@link RouteError.UNKNOWN_DESTINATION}: the id is not in the catalog.
+   *   - {@link RouteError.MESHLESS_LEVEL}: the destination resolves, but NONE of
+   *     its placement levels carries a navmesh (the level is unroutable).
+   *   - {@link RouteError.SNAP_FAILED}: at least one placement level HAS a mesh,
+   *     but the unit has neither a `doors_by_unit` nor a `centroids_by_unit`
+   *     entry — there is no snappable navmesh point.
+   *
+   * @param {string} id
+   * @returns {{anchor: Object, location: Object}|{anchor: null, code: string, message: string}}
+   */
+  #resolveDestination(id) {
+    const location = this.#locationStore?.getLocation(id);
+    if (!location) {
+      return {
+        anchor: null,
+        code: RouteError.UNKNOWN_DESTINATION,
+        message: `Destination ${id} is not in the catalog`
       };
     }
 
-    const avoidSet = new Set(options.avoidNodeIds || []);
-    const allNodes = this.#locationStore.nodeById;
+    const anchor = this.#anchorForLocation(location);
+    if (anchor) return { anchor, location };
 
-    const gScore = new Map();
-    const fScore = new Map();
-    const cameFrom = new Map();
-    const closedSet = new Set();
-
-    for (const node of this.#locationStore.nodes) {
-      gScore.set(node.id, Infinity);
-      fScore.set(node.id, Infinity);
+    // No anchor: classify WHY. If any placement level is meshed, the failure is
+    // a snap failure on that meshed floor; otherwise every level is meshless.
+    const onAMeshedLevel = (location.levelCodes || []).some((code) =>
+      this.#navGraph.levelGraphs.has(code)
+    );
+    if (onAMeshedLevel) {
+      return {
+        anchor: null,
+        code: RouteError.SNAP_FAILED,
+        message: `Destination ${id} has no snappable navmesh point (no door or centroid)`
+      };
     }
-    gScore.set(startNode.id, 0);
-    fScore.set(startNode.id, this.#heuristic(startNode, endNode));
+    return {
+      anchor: null,
+      code: RouteError.MESHLESS_LEVEL,
+      message: `Destination ${id} is on a level with no navmesh`
+    };
+  }
 
-    const openSet = new MinHeap((a, b) => fScore.get(a) - fScore.get(b));
-    openSet.insert(startNode.id);
+  // ---- Anchors & snapping -------------------------------------------------
 
-    while (!openSet.isEmpty) {
-      const currentId = openSet.extractMin();
+  /**
+   * Snap a Location to a `{levelCode, x, y, triIndex, unitId}` anchor. Picks the
+   * first unit on a routable (meshed) floor; snap order is the unit's first door
+   * (carries `triangle_index`) then its centroid + nearest-triangle search
+   * (architect decision (c)). Returns `null` when no unit on any meshed floor
+   * has a snappable door/centroid — the caller classifies the failure.
+   * @param {import('../data/LocationModel.js').Location} location
+   * @returns {Object|null}
+   */
+  #anchorForLocation(location) {
+    for (const unitId of location.unitIds || []) {
+      // Determine the unit's floor from its display node (carries levelCode).
+      const node = (location.displayNodes || []).find((n) => n.unitId === unitId);
+      const levelCode = node?.levelCode;
+      if (!levelCode) continue;
+      const anchor = this.#anchorForUnit(levelCode, unitId);
+      if (anchor) return anchor;
+    }
+    return null;
+  }
 
-      if (currentId === endNode.id) {
-        const path = this.#reconstructPath(cameFrom, currentId, allNodes);
-        return {
-          success: true,
-          path,
-          distance: this.#computeGeometricDistance(path),
-          levelDistance: this.#computeLevelDelta(path),
-          weightedCost: gScore.get(currentId)
-        };
+  /**
+   * Snap a specific unit on a level to its anchor via the level mesh's
+   * door/centroid indices.
+   * @param {string} levelCode
+   * @param {number|string} unitId
+   * @returns {Object|null}
+   */
+  #anchorForUnit(levelCode, unitId) {
+    const graph = this.#navGraph.levelGraphs.get(levelCode);
+    const mesh = graph?.navmesh;
+    if (!mesh) return null;
+
+    // 1. First door of the unit (carries an explicit triangle_index).
+    const door = this.#firstDoor(mesh, unitId);
+    if (door) {
+      let triIndex = door.triangle_index;
+      if (!(typeof triIndex === 'number' && triIndex >= 0 && triIndex < mesh.triangles.length)) {
+        triIndex = findNearestTriangle(mesh, door.x, door.y);
       }
+      if (triIndex >= 0) return { levelCode, x: door.x, y: door.y, triIndex, unitId };
+    }
 
-      closedSet.add(currentId);
-      const current = allNodes.get(currentId);
+    // 2. Unit centroid + nearest-triangle search.
+    const centroid = this.#unitCentroid(mesh, unitId);
+    if (centroid) {
+      const snapped = this.#snapPoint(mesh, centroid[0], centroid[1]);
+      if (snapped) return { levelCode, ...snapped, unitId };
+    }
+    return null;
+  }
 
-      for (const neighbor of (current.peers || [])) {
-        const neighborId = neighbor.id;
-
-        if (closedSet.has(neighborId) || avoidSet.has(neighborId)) {
-          continue;
-        }
-
-        const stepCost = this.#edgeCost(current, neighbor, options);
-        if (stepCost === Infinity) continue;
-
-        const tentativeG = gScore.get(currentId) + stepCost;
-
-        if (tentativeG < gScore.get(neighborId)) {
-          cameFrom.set(neighborId, currentId);
-          gScore.set(neighborId, tentativeG);
-          fScore.set(neighborId, tentativeG + this.#heuristic(neighbor, endNode));
-
-          if (openSet.has(neighborId)) {
-            openSet.updatePriority(neighborId);
-          } else {
-            openSet.insert(neighborId);
-          }
-        }
+  #firstDoor(mesh, unitId) {
+    const doors = mesh.doors_by_unit?.[unitId] ?? mesh.doors_by_unit?.[String(unitId)];
+    if (Array.isArray(doors) && doors.length > 0) {
+      const d = doors[0];
+      const x = Array.isArray(d) ? d[0] : d?.x;
+      const y = Array.isArray(d) ? d[1] : d?.y;
+      if (typeof x === 'number' && typeof y === 'number') {
+        return { x, y, triangle_index: d?.triangle_index };
       }
     }
-
-    return { success: false, path: [], distance: 0, levelDistance: 0 };
+    return null;
   }
 
-  #searchNodePairs(startNodes, endNodes, options) {
-    let best = null;
-    let bestWeightedCost = Infinity;
-
-    for (const startNode of startNodes) {
-      for (const endNode of endNodes) {
-        const result = this.#astar(startNode, endNode, options);
-
-        if (result.success && result.weightedCost < bestWeightedCost) {
-          bestWeightedCost = result.weightedCost;
-          best = {
-            ...result,
-            startNode,
-            endNode
-          };
-        }
-      }
-    }
-
-    return best;
+  #unitCentroid(mesh, unitId) {
+    const c = mesh.centroids_by_unit?.[unitId] ?? mesh.centroids_by_unit?.[String(unitId)];
+    if (Array.isArray(c) && c.length >= 2) return c;
+    if (c && typeof c.x === 'number') return [c.x, c.y];
+    return null;
   }
 
-  #heuristic(a, b) {
-    return this.#distance(a, b);
+  /** Snap an arbitrary world point to its containing/nearest triangle. */
+  #snapPoint(mesh, x, y) {
+    const triIndex = findNearestTriangle(mesh, x, y);
+    if (triIndex < 0) return null;
+    return { x, y, triIndex };
   }
 
-  #edgeCost(from, to, options = {}) {
-    const base = this.#distance(from, to);
+  // ---- Connectors ---------------------------------------------------------
 
-    const fromLevelId = this.#getLevelId(from);
-    const toLevelId = this.#getLevelId(to);
-    const isCrossLevel = fromLevelId && toLevelId && fromLevelId !== toLevelId;
-
-    if (!isCrossLevel) return base;
-
-    const isEscalator = this.#isNodeKind(from, 'ESCALATOR') || this.#isNodeKind(to, 'ESCALATOR');
-    const isLift = this.#isNodeKind(from, 'LIFT') || this.#isNodeKind(to, 'LIFT');
-    const connectorConstraint = this.#normalizeConnectorConstraint(options.connectorConstraint);
-
-    if (connectorConstraint === 'lift-only') {
-      return isLift ? base + PathFinder.CROSS_LEVEL_BASE_PENALTY : Infinity;
-    }
-
-    if (connectorConstraint === 'escalator-only') {
-      return isEscalator ? base + PathFinder.CROSS_LEVEL_BASE_PENALTY : Infinity;
-    }
-
-    if (!isEscalator && !isLift) {
-      return base + PathFinder.CROSS_LEVEL_BASE_PENALTY;
-    }
-
-    const preferredPenalty = PathFinder.PREFERRED_PENALTY;
-    const nonPreferredPenalty = PathFinder.NON_PREFERRED_PENALTY;
-
-    if (this.#routeMode === 'escalator') {
-      return base + PathFinder.CROSS_LEVEL_BASE_PENALTY +
-        (isEscalator ? preferredPenalty : nonPreferredPenalty);
-    }
-
-    return base + PathFinder.CROSS_LEVEL_BASE_PENALTY +
-      (isLift ? preferredPenalty : nonPreferredPenalty);
+  #connectorsBetween(fromCode, toCode) {
+    return (this.#navGraph.transitions || []).filter((t) => {
+      const codes = t.levelCodes || [];
+      return codes.includes(fromCode) && codes.includes(toCode);
+    });
   }
 
-  #isNodeKind(node, kind) {
-    if (!node) return false;
-
-    const location = node.location;
-    if (location && typeof location === 'object') {
-      return location.kind === kind;
-    }
-
-    if (typeof location === 'number') {
-      const rawLoc = this.#rawLocationsMap.get(location);
-      return rawLoc?.kind === kind;
-    }
-
-    return false;
+  /**
+   * Whether a connector group is step-free / accessible. Reads the
+   * {@link RouteTransition} `isAccessible` flag, tolerating a raw
+   * `is_accessible` spelling for robustness.
+   */
+  #isAccessible(transition) {
+    return !!(transition?.isAccessible ?? transition?.is_accessible);
   }
 
-  #distance(a, b) {
-    const dx = a.point.x - b.point.x;
-    const dy = a.point.y - b.point.y;
-    return Math.sqrt(dx * dx + dy * dy);
+  /**
+   * A small preference penalty so the route mode's connector kind (and the
+   * cheaper group) is favoured when several connect the same floors.
+   */
+  #connectorPenalty(transition) {
+    const preferredKind = this.#routeMode === 'lift' ? 'elevator' : 'escalator';
+    const modePenalty = transition.kind === preferredKind ? 0 : 1000;
+    return (transition.cost || 0) * 100 + modePenalty;
   }
 
-  #reconstructPath(cameFrom, endId, allNodes) {
-    const path = [];
-    let current = endId;
+  // ---- Result helpers -----------------------------------------------------
 
-    while (current !== undefined) {
-      path.push(allNodes.get(current));
-      current = cameFrom.get(current);
-    }
-
-    return path.reverse();
+  #anchorView(anchor) {
+    return { levelCode: anchor.levelCode, x: anchor.x, y: anchor.y };
   }
 
-  #computeGeometricDistance(path) {
-    if (path.length < 2) return 0;
-
-    let total = 0;
-    for (let i = 1; i < path.length; i++) {
-      total += this.#distance(path[i - 1], path[i]);
-    }
-    return total;
-  }
-
-  #computeLevelDelta(path) {
-    if (path.length < 2) return 0;
-
-    const startLevel = path[0]?.level;
-    const endLevel = path[path.length - 1]?.level;
-    const startOrdinal = typeof startLevel === 'object' ? startLevel.ordinal : undefined;
-    const endOrdinal = typeof endLevel === 'object' ? endLevel.ordinal : undefined;
-
-    if (startOrdinal === undefined || endOrdinal === undefined) {
-      return 0;
-    }
-
-    return (endOrdinal || 0) - (startOrdinal || 0);
-  }
-
-  #getLevelId(node) {
-    const level = node?.level;
-    if (!level) return null;
-    return typeof level === 'object' ? level.id : level;
-  }
-
-  #buildCacheKey(startId, endId, options) {
-    const avoidStr = options.avoidNodeIds?.length
-      ? `;avoid=${[...options.avoidNodeIds].sort((a, b) => a - b).join(',')}`
-      : '';
-    const connectorConstraint = this.#normalizeConnectorConstraint(options.connectorConstraint) ?? 'none';
-    return `${startId}->${endId};mode=${this.#routeMode};constraint=${connectorConstraint}${avoidStr}`;
-  }
-
-  #normalizeConnectorConstraint(value) {
-    return value === 'lift-only' || value === 'escalator-only' ? value : null;
-  }
-
-  #errorResult(message) {
+  #fail(code, message) {
     return {
       success: false,
+      code,
       error: message,
-      path: [],
+      segments: new Map(),
+      transitions: [],
       distance: 0,
-      levelDistance: 0
+      startAnchor: null,
+      endAnchor: null
     };
   }
 }

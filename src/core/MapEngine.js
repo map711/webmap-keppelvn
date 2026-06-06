@@ -6,6 +6,7 @@ import { LocationStore } from '../data/LocationModel.js';
 import { MapGeometryStore } from '../data/MapGeometryModel.js';
 import { PathFinder } from '../navigation/PathFinder.js';
 import { RouteManager } from '../navigation/RouteManager.js';
+import { buildNavGraph } from '../navigation/NavGraph.js';
 import { Renderer } from '../renderer/Renderer.js';
 import { FloorLayer } from '../layers/FloorLayer.js';
 import { LocationLayer } from '../layers/LocationLayer.js';
@@ -30,6 +31,7 @@ export class MapEngine {
   #bundleLoader;
   #locationStore;
   #mapGeometryStore;
+  #bundleModel = null;
 
   #pathFinder;
   #routeManager;
@@ -261,19 +263,20 @@ export class MapEngine {
       this.#pinMarkerLayer.setYouAreHereVisible(false);
       this.#navMarkerLayer.setPath(result);
 
-      const startFloor = result.startNode?.level?.code;
+      const startAnchor = result.startAnchor;
+      const startFloor = startAnchor?.levelCode;
       if (startFloor && startFloor !== this.#currentFloor) {
-        // Navigation pans to the start node below; skip the floor-switch refit.
+        // Navigation pans to the start anchor below; skip the floor-switch refit.
         this.setFloor(startFloor, { fitToBounds: false });
       }
 
-      if (result.startNode) {
+      if (startAnchor) {
         const transform = this.#renderer.transform;
         const { min, max } = transform.getScaleBounds();
         const desiredScale = Number.isFinite(options.scale) ? options.scale : 3;
         const targetScale = Math.max(min, Math.min(max, desiredScale));
 
-        this.centerOn(result.startNode.point.x, result.startNode.point.y, {
+        this.centerOn(startAnchor.x, startAnchor.y, {
           animate: options.animate ?? true,
           duration: options.duration ?? 600,
           scale: targetScale
@@ -315,19 +318,20 @@ export class MapEngine {
       this.#pinMarkerLayer.setYouAreHereVisible(false);
       this.#navMarkerLayer.setPath(result);
 
-      const startFloor = result.startNode?.level?.code;
+      const startAnchor = result.startAnchor;
+      const startFloor = startAnchor?.levelCode;
       if (startFloor && startFloor !== this.#currentFloor) {
-        // Navigation pans to the start node below; skip the floor-switch refit.
+        // Navigation pans to the start anchor below; skip the floor-switch refit.
         this.setFloor(startFloor, { fitToBounds: false });
       }
 
-      if (result.startNode) {
+      if (startAnchor) {
         const transform = this.#renderer.transform;
         const { min, max } = transform.getScaleBounds();
         const desiredScale = Number.isFinite(options.scale) ? options.scale : 3;
         const targetScale = Math.max(min, Math.min(max, desiredScale));
 
-        this.centerOn(result.startNode.point.x, result.startNode.point.y, {
+        this.centerOn(startAnchor.x, startAnchor.y, {
           animate: options.animate ?? true,
           duration: options.duration ?? 600,
           scale: targetScale
@@ -802,6 +806,7 @@ export class MapEngine {
     // required top-level key is missing, so a structurally broken bundle never
     // reaches the stores (and `data:loaded` is never emitted for it).
     const bundle = await this.#bundleLoader.load(dataUrl);
+    this.#bundleModel = bundle;
 
     // Both stores hydrate from the one parsed bundle object.
     this.#hydrateStore(this.#locationStore, bundle, { renderScale });
@@ -832,10 +837,30 @@ export class MapEngine {
   }
 
   #createNavigationSystem() {
-    this.#pathFinder = new PathFinder(this.#locationStore);
+    // Build the routing graph from the already-parsed bundle (one-fetch
+    // hydration): meshed level graphs + parsed connector transitions. The
+    // PathFinder snaps catalog ids to mesh anchors via the LocationStore.
+    const transitions = this.#bundleModel?.transitions ?? [];
+    const navGraph = typeof this.#mapGeometryStore.buildNavGraph === 'function'
+      ? this.#mapGeometryStore.buildNavGraph(transitions)
+      : buildNavGraph(this.#mapGeometryStore.levels ?? [], transitions, {
+        navmeshByLevel: this.#bundleModel?.navmesh_by_level ?? null,
+        unitsById: this.#unitsByIdFromModel()
+      });
+
+    this.#pathFinder = new PathFinder(navGraph, this.#locationStore);
     this.#pathFinder.setRouteMode(this.#config.get('routeMode'));
 
     this.#routeManager = new RouteManager(this.#pathFinder, this.#eventBus);
+  }
+
+  /** Index the bundle model's units by id (for the nav-graph connector kinds). */
+  #unitsByIdFromModel() {
+    const map = new Map();
+    for (const unit of this.#bundleModel?.units ?? []) {
+      if (unit && unit.id != null) map.set(unit.id, unit);
+    }
+    return map;
   }
 
   #createLayers() {

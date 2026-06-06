@@ -1,6 +1,7 @@
 import { DataLoader } from './DataLoader.js';
 import { BundleLoader } from './BundleLoader.js';
 import { resolveStyle } from './StyleResolver.js';
+import { buildNavGraph } from '../navigation/NavGraph.js';
 
 /**
  * The neutral default world extent used to frame a meshless, unit-less level
@@ -289,6 +290,9 @@ export class MapGeometryStore {
   #loaded = false;
   #renderScale = 1;
 
+  /** @type {Map<number|string, Object>} unit id -> unit record (for connector kinds) */
+  #unitsById = new Map();
+
   /** @type {MapLevel[]} */
   levels = [];
 
@@ -342,7 +346,28 @@ export class MapGeometryStore {
     this.levels.sort((a, b) => a.ordinal - b.ordinal);
     this.levelByCode = new Map(this.levels.map((l) => [l.code, l]));
 
+    // Index units by id so the nav-graph builder can derive each connector
+    // group's kind from its member unit kind slug (architect decision (b)).
+    this.#unitsById = new Map();
+    for (const unit of model.units || []) {
+      if (unit && unit.id != null) this.#unitsById.set(unit.id, unit);
+    }
+
     this.#loaded = true;
+  }
+
+  /**
+   * Build the routing {@link import('../navigation/NavGraph.js').NavGraph} from
+   * the hydrated {@link MapLevel} navmeshes (meshless levels dropped) and the
+   * bundle's vertical connector `transitions[]`. Pure pass-through: no fetch.
+   *
+   * @param {Array} [transitions] - bundle `transitions[]`
+   * @returns {{levelGraphs: Map<string, Object>, transitions: Object[]}}
+   */
+  buildNavGraph(transitions = []) {
+    return buildNavGraph(this.levels, transitions, {
+      unitsById: this.#unitsById
+    });
   }
 
   #unitsForLevel(model, levelId) {

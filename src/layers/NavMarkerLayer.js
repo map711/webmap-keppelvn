@@ -1,7 +1,18 @@
 import { Layer } from './Layer.js';
 
+const ARROW_UP = '⬆';
+const ARROW_DOWN = '⬇';
+const ARROW_FLAT = '→';
+
 /**
- * NavMarkerLayer renders tap-able floor transition bubbles.
+ * NavMarkerLayer renders tap-able floor-transition bubbles.
+ *
+ * It consumes the route result's stored `transitions[]` directly — each step
+ * carries its OWN flat connector coordinates (`fromX/fromY` on the departure
+ * floor, `toX/toY` on the arrival floor) plus `fromLevelCode`/`toLevelCode`.
+ * The bubble is drawn at the connector point of the active floor, with an
+ * up/down arrow derived from the level ordinals, and is tap-able to switch to
+ * the OTHER floor of the transition.
  */
 export class NavMarkerLayer extends Layer {
   name = 'NavMarkerLayer';
@@ -26,7 +37,7 @@ export class NavMarkerLayer extends Layer {
 
   #currentLevelCode = null;
   #pathResult = null;
-  #fullPath = [];
+  #transitions = [];
 
   #hitBubbles = [];
   #lastScale = 1;
@@ -61,12 +72,15 @@ export class NavMarkerLayer extends Layer {
   }
 
   /**
-   * Set the path for transition markers.
+   * Set the path for transition markers. Stores `routeResult.transitions`
+   * verbatim — bubbles are drawn from each step's own connector coordinates,
+   * never re-derived from the flattened per-floor `segments`.
    * @param {Object} pathResult
    */
   setPath(pathResult) {
     this.#pathResult = pathResult?.success ? pathResult : null;
-    this.#fullPath = this.#pathResult?.path || [];
+    this.#transitions = this.#pathResult ? (this.#pathResult.transitions || []) : [];
+    this.#hitBubbles = [];
   }
 
   /**
@@ -74,7 +88,7 @@ export class NavMarkerLayer extends Layer {
    */
   clear() {
     this.#pathResult = null;
-    this.#fullPath = [];
+    this.#transitions = [];
     this.#hitBubbles = [];
   }
 
@@ -83,7 +97,7 @@ export class NavMarkerLayer extends Layer {
    * @param {Map<string, number>} ordinals
    */
   setLevelOrdinals(ordinals) {
-    this.#levelOrdinals = ordinals;
+    this.#levelOrdinals = ordinals instanceof Map ? ordinals : new Map(Object.entries(ordinals || {}));
   }
 
   setFloor(levelCode) {
@@ -122,7 +136,8 @@ export class NavMarkerLayer extends Layer {
   }
 
   /**
-   * Hit test at world coordinates.
+   * Hit test at world coordinates. Returns the target level code to switch to
+   * when the tap lands on a rendered bubble; `null` otherwise.
    * @param {number} worldX
    * @param {number} worldY
    * @returns {string|null}
@@ -158,10 +173,7 @@ export class NavMarkerLayer extends Layer {
     const { ctx, invalidate } = renderContext;
     if (invalidate) this.#invalidate = invalidate;
     if (!this.visible || !this.#pathResult || !this.#currentLevelCode) return;
-    if (this.#fullPath.length < 2) return;
-
-    const transitions = this.#identifyTransitions();
-    if (!transitions.length) return;
+    if (!this.#transitions.length) return;
 
     const { scale, rotation } = this.#extractTransform(ctx);
     this.#lastScale = scale;
@@ -170,73 +182,64 @@ export class NavMarkerLayer extends Layer {
 
     ctx.save();
 
-    for (const transition of transitions) {
-      const anchor = this.#resolveAnchor(transition);
-      if (!anchor) continue;
-      if (anchor.node.level?.code !== this.#currentLevelCode) continue;
+    for (const transition of this.#transitions) {
+      const bubble = this.#bubbleForTransition(transition);
+      if (!bubble) continue;
 
-      const worldX = anchor.node.point.x;
-      const worldY = anchor.node.point.y;
+      this.#renderBubble(ctx, bubble.anchorX, bubble.anchorY, scale, rotation, bubble.label);
 
-      this.#renderBubble(ctx, worldX, worldY, scale, rotation, anchor.label);
-
-      const metrics = this.#getBubbleMetrics(ctx, anchor.label);
+      const metrics = this.#getBubbleMetrics(ctx, bubble.label);
       this.#hitBubbles.push({
-        anchorX: worldX,
-        anchorY: worldY,
+        anchorX: bubble.anchorX,
+        anchorY: bubble.anchorY,
         width: metrics.width,
         height: metrics.height + this.#geom.tailHeight,
         offsetY: metrics.offsetY,
-        targetLevel: anchor.targetLevel
+        targetLevel: bubble.targetLevel
       });
     }
 
     ctx.restore();
   }
 
-  #identifyTransitions() {
-    const transitions = [];
-    let currentLevel = null;
-
-    for (let i = 0; i < this.#fullPath.length; i++) {
-      const node = this.#fullPath[i];
-      const level = node.level?.code;
-
-      if (level && level !== currentLevel) {
-        if (currentLevel !== null) {
-          transitions.push({
-            fromLevel: currentLevel,
-            toLevel: level,
-            nodeIndex: i
-          });
-        }
-        currentLevel = level;
-      }
-    }
-
-    return transitions;
-  }
-
-  #resolveAnchor(transition) {
-    const { fromLevel, toLevel, nodeIndex } = transition;
+  /**
+   * Resolve the bubble to draw for a transition on the active floor, or `null`
+   * when the transition does not touch the active floor.
+   *
+   * - Active floor is the DEPARTURE floor (`fromLevelCode`): anchor at
+   *   `(fromX, fromY)`, arrow from `fromLevelCode`→`toLevelCode`, tap target
+   *   `toLevelCode`.
+   * - Active floor is the ARRIVAL floor (`toLevelCode`): anchor at
+   *   `(toX, toY)`, arrow from `toLevelCode`→`fromLevelCode`, tap target
+   *   `fromLevelCode`.
+   *
+   * @param {Object} transition
+   * @returns {{anchorX:number, anchorY:number, label:string, targetLevel:string}|null}
+   */
+  #bubbleForTransition(transition) {
+    const fromLevel = transition.fromLevelCode;
+    const toLevel = transition.toLevelCode;
 
     if (this.#currentLevelCode === fromLevel) {
-      const idx = Math.max(0, nodeIndex - 1);
-      const node = this.#fullPath[idx];
+      const from = this.#fromPoint(transition);
+      if (!from) return null;
       const arrow = this.#getArrow(fromLevel, toLevel);
       return {
-        node,
-        label: `${arrow} Tap to ${toLevel}`,
+        anchorX: from.x,
+        anchorY: from.y,
+        label: `${arrow} ${toLevel}`,
         targetLevel: toLevel
       };
     }
 
     if (this.#currentLevelCode === toLevel) {
-      const node = this.#fullPath[nodeIndex];
+      const to = this.#toPoint(transition);
+      if (!to) return null;
       const arrow = this.#getArrow(toLevel, fromLevel);
       return {
-        node,
-        label: `${arrow} Tap to ${fromLevel}`,
+        anchorX: to.x,
+        anchorY: to.y,
+        label: `${arrow} ${fromLevel}`,
         targetLevel: fromLevel
       };
     }
@@ -244,10 +247,42 @@ export class NavMarkerLayer extends Layer {
     return null;
   }
 
+  /**
+   * The departure-floor connector point. Reads the flat `fromX/fromY` contract
+   * first, tolerating a nested `from.{x,y}` spelling for robustness.
+   */
+  #fromPoint(transition) {
+    if (typeof transition.fromX === 'number' && typeof transition.fromY === 'number') {
+      return { x: transition.fromX, y: transition.fromY };
+    }
+    const f = transition.from;
+    if (f && typeof f.x === 'number' && typeof f.y === 'number') return { x: f.x, y: f.y };
+    return null;
+  }
+
+  /**
+   * The arrival-floor connector point. Reads the flat `toX/toY` contract first,
+   * tolerating a nested `to.{x,y}` spelling for robustness.
+   */
+  #toPoint(transition) {
+    if (typeof transition.toX === 'number' && typeof transition.toY === 'number') {
+      return { x: transition.toX, y: transition.toY };
+    }
+    const t = transition.to;
+    if (t && typeof t.x === 'number' && typeof t.y === 'number') return { x: t.x, y: t.y };
+    return null;
+  }
+
+  /**
+   * Up/down/flat arrow derived from the level ordinals: travelling toward a
+   * higher ordinal is UP, lower is DOWN.
+   */
   #getArrow(fromCode, toCode) {
     const fromOrd = this.#levelOrdinals.get(fromCode) ?? 0;
     const toOrd = this.#levelOrdinals.get(toCode) ?? 0;
-    return toOrd > fromOrd ? '⬆' : (toOrd < fromOrd ? '⬇' : '→');
+    if (toOrd > fromOrd) return ARROW_UP;
+    if (toOrd < fromOrd) return ARROW_DOWN;
+    return ARROW_FLAT;
   }
 
   #extractTransform(ctx) {
@@ -279,13 +314,16 @@ export class NavMarkerLayer extends Layer {
   }
 
   #getBubbleMetrics(ctx, label) {
-    if (!this.#measureCtx) {
+    if (!this.#measureCtx && typeof document !== 'undefined') {
       const canvas = document.createElement('canvas');
       this.#measureCtx = canvas.getContext('2d');
     }
 
-    this.#measureCtx.font = `${this.#geom.fontSize}px ${this.#fontFamily}`;
-    const textWidth = this.#measureCtx.measureText(label).width;
+    let textWidth = label.length * this.#geom.fontSize * 0.6;
+    if (this.#measureCtx) {
+      this.#measureCtx.font = `${this.#geom.fontSize}px ${this.#fontFamily}`;
+      textWidth = this.#measureCtx.measureText(label).width;
+    }
     const textHeight = this.#geom.fontSize * 1.2;
 
     const width = textWidth + this.#geom.paddingX * 2;
