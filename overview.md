@@ -91,7 +91,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `src/component/` | `<wayfinder-map>` Web Component + built-in UI controls | `WayfinderMap.js` |
 | `src/navigation/` | Navmesh routing: triangle-A*, funnel string-pull, graph builder, route planner + state | `NavGraph.js`, `TriangleAStar.js`, `FunnelPath.js`, `PathFinder.js`, `RouteManager.js` |
 | `test/` | Vitest node-env suite + `fixtures/SGC_v001.json` real bundle | per-capability `*.test.js` |
-| `demo/` | Static showcase pages for the Phase-1 browse capabilities (bare / default-controls / `focus-shop-id` / theme) + per-demo guide | `index.html` |
+| `demo/` | Static showcase pages for the Phase-1 browse capabilities (bare / default-controls / level-selector-only / `focus-shop-id` / theme) + per-demo guide | `index.html` |
 | `.dev/` | Zero-dep ownership-aware dev-server harness (human vs agent owner, live-reload, `$PORT`/config) | `server.mjs`, `ensure.mjs`, `stop.mjs` |
 | `scripts/` | One-shot build (Rollup + stage gallery into `dist/<BUILD_SECRET>/`) and deploy (`aws s3 sync` → DigitalOcean Spaces) | `build.js`, `deploy.js` |
 

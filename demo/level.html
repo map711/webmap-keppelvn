@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Saigon Centre — Level Selector Only</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+    wayfinder-map { display: block; width: 100vw; height: 100vh; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "qrcode-generator": "../qa-shims/qrcode-generator.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <wayfinder-map
+    data-url="../datas/SGC_v001.json"
+    default-floor="L3"
+    level-selector
+  ></wayfinder-map>
+
+  <script type="module">
+    import "../dist/wayfinder-map.esm.js";
+
+    const map = document.querySelector("wayfinder-map");
+    map.addEventListener("error", (event) => {
+      console.error("Map error:", event.detail?.error || event);
+    });
+  </script>
+</body>
+</html>
