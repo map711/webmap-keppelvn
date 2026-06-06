@@ -27,7 +27,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `map-bootstrap` | Fork the shell; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test/dev on :5080 | `capabilities/map-bootstrap.md` |
 | `destination-catalog` | `LocationStore` builds the placed-shop + facility destination catalog (multi-tenant/multi-unit aware; one-to-many `unitId→Location`) | `capabilities/destination-catalog.md` |
 | `floor-rendering` `(ui)` | Unit-aware `FloorLayer`: per-unit polygons, `unit→layer→kind` style cascade, `getBounds()` fallback, `hitTest→unitId` | `capabilities/floor-rendering.md` |
-| `map-labels` `(ui)` | `LocationLayer` draws labelable-unit labels at `label_point`/`label_rotation` with `_fitScale` + overlap suppression | `capabilities/map-labels.md` |
+| `map-labels` `(ui)` | `LocationLayer` draws labelable-unit labels at `label_point`/`label_rotation`, zoom-responsive screen-space font (`max(minFontSize·dpr, fontSize·√scale·dpr)`) + cached overlap suppression with zoom-freeze/idle-recompute | `capabilities/map-labels.md` |
 | `floor-switching` `(ui)` | Level selector + `setFloor` swap geometry+labels and refit; `floor:changed` event; empty L1 + sparse B2/B1 | `capabilities/floor-switching.md` |
 | `destination-search` `(ui)` | Built-in search filters the catalog by title/tokens; results dropdown + info card | `capabilities/destination-search.md` |
 | `destination-focus` `(ui)` | `focusLocation` / polygon tap: switch floor + zoom + end pin; multi-tenant disambiguation; clear → browse | `capabilities/destination-focus.md` |
@@ -114,8 +114,9 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 ### Pre-resolved label placement
 - **Where used:** `LocationModel`'s `DisplayNode` (anchor=`label_point`,
   rotation=`label_rotation` deg→rad at build) consumed by `LocationLayer`.
-- **Example:** the layer draws at the pre-resolved anchor/angle and only
-  shrink-to-fits; no polylabel/OBB recompute.
+- **Example:** the layer draws at the pre-resolved anchor/angle (with a `+π`
+  upright flip) at a zoom-responsive screen-space font; no polylabel/OBB recompute
+  and no unit-shrink.
 - **When to use:** trust the CMS's authored placement; don't re-derive geometry.
 
 ### Bus event → DOM event re-emit
@@ -142,7 +143,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 |---------|----------|---------|
 | `resolveStyle(unit, layersById, kindsBySlug)` | `src/data/StyleResolver.js` | unit→layer→kind style cascade |
 | `geometryToPoints(geometry)` | `src/data/MapGeometryModel.js` | GeoJSON ring → `Point[]` (drop closing vertex) |
-| `_fitScale(...)` | `src/layers/labelFit.js` | shrink-to-fit scalar, clamped at 1 |
+| `_fitScale(...)` | `src/layers/labelFit.js` | shrink-to-fit scalar, clamped at 1 (pure util; **no longer used by `LocationLayer`** after the label re-work) |
 | `computeVisibleRects(rects)` | `src/renderer/RectVisibility.js` | rbush screen-rect overlap suppression |
 | `buildNavGraph(levels, transitions)` | `src/navigation/NavGraph.js` | per-meshed-level graph + parsed `RouteTransition[]` (meshless omitted) |
 | `triangleAStar` / `findNearestTriangle` | `src/navigation/TriangleAStar.js` | triangle-adjacency A* + point→triangle snap |

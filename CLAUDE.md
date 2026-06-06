@@ -34,3 +34,12 @@ Project map + decisions live in `overview.md`; per-capability records in
 - **Connector kind slug is `'elevator'`, not `'lift'`.** The real bundle's
   accessible connector is kind `elevator`; the `routeMode='lift'` toggle maps to
   it. Don't assert `'lift'` as an emitted `transition.kind`.
+- **Label font is screen-space `max(minFontSize·dpr, fontSize·√scale·dpr)`**,
+  applied once to `ctx.font` then counter-scaled by `1/scale` — a `minFontSize·dpr`
+  FLOOR with √scale growth above it. There is **no `_fitScale` unit-shrink** (the
+  font is independent of the unit polygon; `labelFit.js` is unused by the layer).
+  The overlap-thinning rect width is the **measured screen box** at the active
+  font — never `box.width/scale`. Visibility thinning is **cached on
+  (scale, rotation)**; `beginZoom()` freezes it and `endZoom()` schedules an idle
+  recompute (setTimeout fallback under fake timers) that calls the render
+  context's `invalidate`.
