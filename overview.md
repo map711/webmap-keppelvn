@@ -32,7 +32,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `destination-search` `(ui)` | Built-in search filters the catalog by title/tokens; results dropdown + info card | `capabilities/destination-search.md` |
 | `destination-focus` `(ui)` | `focusLocation` / polygon tap: switch floor + zoom + end pin; multi-tenant disambiguation; clear → browse | `capabilities/destination-focus.md` |
 | `navmesh-routing` | Triangle-A* + funnel string-pull over `navmesh_by_level`, cross-floor via `transitions`; per-floor polyline `segments` (no fake `Node[]`) | `capabilities/navmesh-routing.md` |
-| `route-preferences` | Escalator/lift **soft** cost penalty (`cost` vs `cost+100`) + step-free **hard** gate (`is_accessible` only); cache invalidates on mode change | `capabilities/route-preferences.md` |
+| `route-preferences` | Escalator/lift **soft** cost penalty (`cost` vs `cost+100`) + step-free **hard** gate + per-call hard `connectorConstraint`; no memoisation (each `findPath` re-plans) | `capabilities/route-preferences.md` |
 | `unroutable-level-handling` | Meshless/unknown/un-snappable/no-path return typed `{success:false, code}` without throwing; `route:error`; floor stays browseable | `capabilities/unroutable-level-handling.md` |
 | `route-rendering` `(ui)` | `NavigationLayer` animated per-floor polyline (grey full + black progress); re-slices on floor switch; engine frames start anchor | `capabilities/route-rendering.md` |
 | `route-markers` `(ui)` | `PinMarkerLayer` start/end pins + `NavMarkerLayer` floor-transition bubbles ("↑ Tap to L3") with `hitTest→levelCode` | `capabilities/route-markers.md` |
@@ -40,10 +40,14 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 
 ## Constraints
 
-- **Sparse seed fixture:** of 20 shops only **5 are placed** (4 tenanted units,
-  all on L3), and **L1 (level id 3) is meshless _and_ unit-less** — a meshless/
-  empty level must still be selectable, browseable, and frame without error.
-  Real-bundle criteria assert data-driven **rules**, not seed magic-numbers.
+- **Sparse seed, and fixture ≠ live bundle.** The live `datas/SGC_v001.json`
+  (refreshed) places **6 of 20 shops across L2+L3**; **B2/B1/L1 are all unit-less
+  and meshless** (units + navmesh live only on L2/L3). The pinned **test fixture**
+  (`test/fixtures/SGC_v001.json`) is the older Phase-1 snapshot — **5 placed, all
+  on L3**, with B2/B1 carrying 1 unit + mesh and only L1 empty — and the suite
+  asserts against the **fixture**. Either way a meshless/empty level must stay
+  selectable, browseable, and frame without error. Real-bundle criteria assert
+  data-driven **rules**, never seed magic-numbers.
 - Canvas-2D only — no Konva. Single `data-url` (the bundle carries everything).
   Raw CMS coordinates, `renderScale = 1`.
 - Public component/engine API + built-in UI from the shell stay intact so Phase
@@ -214,9 +218,9 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
   speech-bubble end pin; the rest of the floor recedes.
 
 ### State & feedback patterns
-- **Empty/edge:** sparse (B2/B1) and empty (L1) levels still frame via the
-  `getBounds()` fallback; search empty state shows "no matches"; load is instant
-  (in-memory catalog index).
+- **Empty/edge:** empty sub-levels (B2/B1/L1 in the live bundle; L1 in the
+  fixture) still frame via the `getBounds()` fallback; search empty state shows
+  "no matches"; load is instant (in-memory catalog index).
 
 ### Responsive & accessibility baseline
 - **Breakpoint:** 768px (desktop panel vs mobile fullscreen). Device mode resolved

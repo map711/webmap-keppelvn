@@ -62,7 +62,9 @@ map": every other capability feeds into it.
   green-but-wrong where the mock hid the pin was fixed with a render fallback.
 - **Invariant:** `minScale` must be re-derived on each refit — a stale `minScale`
   left after fitting a tiny floor (B2/B1) blocked the focus zoom-in (stuck at
-  2.5×); the QA fix refits to ~0.17 after a tiny floor so focus can zoom past it.
+  2.5×). `TransformPipeline.fitToBounds` lowers the `minScale` floor to the
+  natural fit scale (`min(fitScale, maxScale)`) on every fit, so the fitted view
+  becomes the zoom-out limit and a later focus can zoom in past it.
 
 ## UX & accessibility
 

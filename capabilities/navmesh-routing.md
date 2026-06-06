@@ -59,7 +59,7 @@ through the bundle's `transitions`. The result is **per-floor polyline segments*
 - **Decision:** route result = per-floor polyline `segments` + `transitions` + anchors. Rejected: synthesize fake `Node[]` (breaks any `node.peers`/`node.id` consumer and the cross-floor split).
 - **Invariant:** one fetch per init — the graph is built from the already-parsed `BundleModel` inside `#createNavigationSystem`; no store fetches its own data.
 - **Invariant:** the router returns a typed result and never throws; callers branch on `result.success`.
-- **Constraint (data):** review removed a dead `#cache` field in `PathFinder` that memoised nothing — caching is `clearCache()`-gated on mode/step-free change only.
+- **Constraint (data):** `PathFinder` does **not** memoise routes — every `findPath` re-plans from scratch, so a flipped `routeMode`/`stepFree` needs no invalidation. `clearCache()` is a retained no-op lifecycle hook (a dead `#cache` field that memoised nothing was removed in review).
 
 ## Tests
 

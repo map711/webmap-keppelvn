@@ -12,9 +12,13 @@ shops + tenancies + facility units into namespaced `Location` records and the
 - **Catalog = placed shops + routable facilities only.** One `shop:<id>`
   Location per **distinct `shop_id` referenced by any unit tenancy** — so the
   count equals the number of distinct tenancy `shop_id`s, **not** `shops[].length`.
-  On the SGC seed that is **5** (Starbucks, ABC Mart Grand Stage, ASICS,
-  Basta Hiro, Armani Exchange — from 4 tenanted units, all on L3); the 15 shops
-  in `shops[]` referenced by no tenancy yield **no** Location.
+  In the **test fixture** (`test/fixtures/SGC_v001.json`, what the tests pin to)
+  that is **5** (Starbucks, ABC Mart Grand Stage, ASICS, Basta Hiro, Armani
+  Exchange — from 4 tenanted units, all on L3); the 15 unreferenced `shops[]`
+  yield **no** Location. The live `datas/SGC_v001.json` was refreshed (commit
+  53e1044) to **6** placed shops across **5 tenanted units on L2+L3** — the rule
+  is identical; only the seed counts differ (see [[map-bootstrap]] / `CLAUDE.md`
+  on the fixture↔live divergence).
 - **Multi-unit shop:** a shop occupying several units lists every unit in
   `unitIds[]` and every spanned floor in `levelCodes[]` (no such shop on the real
   seed — verified on the mini-bundle).
@@ -71,14 +75,15 @@ shops + tenancies + facility units into namespaced `Location` records and the
 - **Decision:** string-namespaced ids `shop:<id>` / `unit:<id>` (inherited from
   the epic). Rejected: numeric `+1e6` facility offsets (fragile, silent
   collisions).
-- **Invariant:** `shop:<id>` count == distinct tenancy `shop_id` count (5 on the
-  seed), never `shops[].length`. Connectors are never Locations.
+- **Invariant:** `shop:<id>` count == distinct tenancy `shop_id` count (5 in the
+  test fixture; 6 in the refreshed live bundle), never `shops[].length`.
+  Connectors are never Locations.
 - **Invariant:** `getLocationsByUnitId` always returns a list (possibly empty),
   never a scalar — the HitTestManager classifier depends on `.length`.
 
 ## Tests
 
-- `test/data/LocationCatalog.test.js` — placed-shop-only count (=5 vs real SGC),
+- `test/data/LocationCatalog.test.js` — placed-shop-only count (=5 vs the test fixture),
   multi-tenant unit 121 → both Locations, multi-unit shop (mini-bundle), facility
   `unit:<id>` (mini-bundle) / empty on real seed, connector & vacant exclusion,
   one-to-many `getLocationsByUnitId`, `displayNodes` anchor/rotation/level.

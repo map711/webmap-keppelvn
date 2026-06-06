@@ -22,19 +22,25 @@ accessibility gate.
   group even when the escalator is cheaper. When **no** accessible connector
   exists between the floors, `findPath` returns a typed failure (the inaccessible
   connector is gated to `Infinity`, not used) rather than a step route.
-- **Cache invalidation.** Changing `routeMode` or `stepFree` invalidates the
-  route cache, so the next `findPath` reflects the new mode, never a stale result.
+- **Hard per-call kind gate.** A per-call `connectorConstraint`
+  (`'lift-only'` → elevator, `'escalator-only'` → escalator, `null` =
+  unconstrained) is a **hard** gate distinct from the soft `routeMode`: it forbids
+  the non-matching connector kind outright, so a `'lift-only'` request never falls
+  back to the cheaper escalator (unlike the soft preference, which always can).
+- **No memoisation.** Routes are not cached — every `findPath` re-plans, so a
+  flipped `routeMode`/`stepFree` takes effect on the very next call without any
+  invalidation step. `clearCache()` is a retained no-op lifecycle hook.
 - **Connector kind source.** Kind is derived from the connector group
   (`is_accessible ? 'elevator' : 'escalator'`) / the member unit's `kind` slug —
   not inferred from `cost` magic numbers.
 
 ## Interfaces & contracts
 
-- `PathFinder.setRouteMode('escalator'|'lift')` — sets the preferred kind; a no-op for an unknown value; invalidates cache on change.
-- `PathFinder.setStepFree(boolean)` — toggles the hard accessibility gate; invalidates cache on change.
-- `PathFinder.getRouteMode()` → `'escalator'|'lift'`.
+- `PathFinder.setRouteMode('escalator'|'lift')` — sets the sticky preferred kind; a no-op for an unknown value.
+- `PathFinder.setStepFree(boolean)` — toggles the sticky hard accessibility gate.
+- `PathFinder.getRouteMode()` / `getStepFree()` → current sticky values.
 - `RouteManager.setRouteMode(mode)` / `getRouteMode()` — thin pass-through that re-routes the current pair.
-- `PathFinder.findPath(startId, endId, { stepFree, connectorKind })` — options override the sticky mode for one call.
+- `PathFinder.findPath(startId, endId, { stepFree, connectorConstraint })` — per-call overrides for one route: `stepFree` (bool) overrides the sticky gate; `connectorConstraint` (`'lift-only'`/`'escalator-only'`/`null`) is the hard kind gate. Internally resolved to `{ stepFree, connectorKind }`.
 
 ## Data model
 
@@ -49,4 +55,4 @@ accessibility gate.
 
 ## Tests
 
-- `test/navigation/NavmeshRouting.test.js` — escalator-default vs lift-mode pick, soft-penalty fallback when only the non-preferred connector exists, step-free route-exists (accessible-only) and step-free no-route (typed `NO_PATH`-class failure), mode/step-free cache invalidation. Driven by the two-connector synthetic fixture (escalator `is_accessible:false` cost 1.0, lift `is_accessible:true` cost 2.0).
+- `test/navigation/NavmeshRouting.test.js` — escalator-default vs lift-mode pick, soft-penalty fallback when only the non-preferred connector exists, step-free route-exists (accessible-only) and step-free no-route (typed `NO_PATH`-class failure), mode/step-free flip reflected on the next `findPath` (no memoisation). Driven by the two-connector synthetic fixture (escalator `is_accessible:false` cost 1.0, lift `is_accessible:true` cost 2.0).

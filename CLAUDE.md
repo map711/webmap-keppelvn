@@ -25,9 +25,15 @@ Project map + decisions live in `overview.md`; per-capability records in
   and connector-pin (floor-transition) tap — also pass `{fitToBounds:false}`** to
   hold zoom/pan/rotation across levels; only the initial load (or an explicit
   `{fitToBounds:true}`) reframes. A user floor-tap must NOT refit.
-- **Bundle counts are seed-sparse:** 20 shops but only 5 placed (all L3); L1 is
-  meshless **and** unit-less. Assert data-driven *rules* against the real
-  `SGC_v001.json`; put concrete counts in the synthetic **mini-bundle** fixture.
+- **Bundle counts are seed-sparse, and the two bundles have diverged.** The live
+  `datas/SGC_v001.json` (refreshed in 53e1044) places **6 shops across L2+L3**;
+  **B2/B1/L1 are all unit-less and meshless** (units + navmesh only on L2/L3).
+  The pinned **test fixture** `test/fixtures/SGC_v001.json` is the older Phase-1
+  snapshot — **5 placed (all L3)**, B2/B1 carry 1 unit + mesh, only L1 empty — and
+  **every test asserts against the fixture**, not the live bundle. So: assert
+  data-driven *rules* (never raw counts) against `SGC_v001.json`; keep concrete
+  counts in the synthetic **mini-bundle** fixture; and don't trust a fixture count
+  as live-bundle reality.
 - **Tests:** Vitest node-env; pure ports tested via mini-bundle, real 2 MB bundle
   only in opt-in smoke tests. **No test binds a port** — fetch is mocked / fixtures
   read from disk; only `buildInfra.test.js` shells out, to run the real `rollup`.
