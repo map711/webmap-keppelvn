@@ -1,6 +1,6 @@
 // >>> TARS cap:map-labels
 //
-// map-labels (RE-WORK) — LocationLayer label sizing is ported from sunwaymalls:
+// map-labels (RE-WORK) — LocationLayer label sizing is ported from the upstream shell:
 // a ZOOM-RESPONSIVE screen-space font with a √scale growth curve and a
 // `minFontSize·dpr` FLOOR, the `_fitScale` unit-shrink REMOVED, the overlap
 // thinning rect matched to the drawn screen footprint (not box/scale), and

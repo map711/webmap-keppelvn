@@ -10,7 +10,7 @@ import { computeVisibleRects } from '../renderer/RectVisibility.js';
  * with its `label_rotation` (already converted degrees → radians by the catalog —
  * NO polylabel/OBB recompute here).
  *
- * SIZING (ported from sunwaymalls): the label is drawn at a ZOOM-RESPONSIVE
+ * SIZING: the label is drawn at a ZOOM-RESPONSIVE
  * screen-space font px = `max(minFontSize·dpr, fontSize·√scale·dpr)` — a √scale
  * growth curve clamped to a `minFontSize·dpr` FLOOR — applied once to `ctx.font`,
  * then counter-scaled by `1/scale` so the on-screen size is constant regardless

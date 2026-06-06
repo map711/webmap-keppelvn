@@ -12,7 +12,7 @@
 // BROWNFIELD-RETROFIT / REGRESSION-LOCK NOTICE (read before judging RED state):
 // This capability's floor-selection API (`getFloors`/`getLevels`/`setFloor`/
 // `getCurrentFloor`, the floor:changed emit, the getBounds() refit) was inherited
-// VERBATIM from the forked `webmap-sunwaymalls` Canvas-2D shell, and every data
+// VERBATIM from the forked upstream Canvas-2D shell, and every data
 // collaborator it drives (MapGeometryStore level ordering, FloorLayer per-level
 // drawables + getBounds fallback, LocationLayer per-level labels) already shipped
 // in the prior capabilities `floor-rendering`, `map-labels`, `destination-catalog`.

@@ -1,4 +1,4 @@
-# Run — Label legibility & zoom-responsive sizing (port sunwaymalls label handling)
+# Run — Label legibility & zoom-responsive sizing
 Started:  2026-06-06 12:22:56
 Status:   ✓ complete
 
@@ -24,5 +24,5 @@ Duration: 21m 7s · 1/1 green · 0 blocked · 0 errored
 
 ## Highlights  ← for the human · to improve the agents
 
-- ✓ **map-labels** `(ui)` — clean single-pass build: 7 RED tests failed on assertion (crit 8 a green regression guard for the labelable gate), integrity pinned all 8 criteria with no rewrites, GREEN on impl 1/4 (full suite 193/193, no regressions), review found nothing ≥80. The sunway font/visibility-caching port landed cleanly against keppel's own node accessors.
+- ✓ **map-labels** `(ui)` — clean single-pass build: 7 RED tests failed on assertion (crit 8 a green regression guard for the labelable gate), integrity pinned all 8 criteria with no rewrites, GREEN on impl 1/4 (full suite 193/193, no regressions), review found nothing ≥80. The font/visibility-caching work landed cleanly against keppel's own node accessors.
 - ⓘ **map-labels** — **browser-QA skipped** (chrome-devtools-mcp locked during the run). QA'd code-only against the real layer (criteria 1–8 verified); a live-browser smoke pass on the rendered labels is still owed. Run `/tars:review --ui` once the browser tool is free.

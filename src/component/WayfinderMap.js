@@ -3482,7 +3482,7 @@ class WayfinderMapElement extends HTMLElement {
   #pickLocationNode(location) {
     const currentFloor = this.#engine?.getCurrentFloor?.();
     // The SGC destination catalog places geometry on `displayNodes` (keyed by
-    // `levelCode`); the legacy `{nodes}` payload is the sunwaymalls fallback. Mirror
+    // `levelCode`); the legacy `{nodes}` payload is the fallback. Mirror
     // LocationModel.getNodesOnLevel: prefer displayNodes, else legacy nodes.
     const displayNodes = Array.isArray(location?.displayNodes) ? location.displayNodes : [];
     if (displayNodes.length) {

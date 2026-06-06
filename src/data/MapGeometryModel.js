@@ -281,7 +281,7 @@ export class MapLevel {
  * Store for map geometry (floor plans), rebuilt over the webmap bundle.
  *
  * Hydrates per-unit drawable polygons per level from an indexed bundle model.
- * The public seam is preserved from the sunwaymalls shell: `levels` /
+ * The public seam is preserved from the upstream shell: `levels` /
  * `levelByCode` arrays/maps, `getLevelByCode` / `getLevelsSorted` /
  * `getFloorCodes`.
  */

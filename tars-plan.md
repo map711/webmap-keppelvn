@@ -1,4 +1,4 @@
-# Plan — Label legibility & zoom-responsive sizing (port sunwaymalls label handling)
+# Plan — Label legibility & zoom-responsive sizing
 
 <!-- Single-cycle refinement of the shipped Phase-1 `map-labels` capability. NOT an
 epic phase — the epic marker stays on Phase 3 (Kiosk & share). At /tars:cleanup this
@@ -10,8 +10,8 @@ folds into capabilities/map-labels.md (fix/amend, same slug). -->
   unreadable** — especially zoomed out — and the zoom range "feels off." Re-work
   the `map-labels` capability so labels stay **constant-readable** at any zoom,
   grow gently as you zoom in, and never depend on how small the unit polygon is —
-  matching the proven `webmap-sunwaymalls` label behavior the shell was forked
-  from. Also fold in sunway's label **visibility-caching / idle-recompute**
+  matching the proven label behavior the shell already provides. Also fold in the
+  label **visibility-caching / idle-recompute**
   machinery, because label density on SGC is expected to grow and per-frame
   overlap thinning must stay cheap.
 - **Constraints:**
@@ -25,26 +25,26 @@ folds into capabilities/map-labels.md (fix/amend, same slug). -->
   - **Behavior-changing** to `map-labels`: the documented `_fitScale`
     shrink-to-fit promise is replaced by a min-size-floor promise. (User confirmed
     via the fix-mode adherence gate → escalated here for planning rigor.)
-  - **Zoom mechanism is NOT restructured.** The fit/min/max clamp path already
-    matches sunway; `maxZoom: 2.5` stays the default. "Zoom feels off" is dominated
+  - **Zoom mechanism is NOT restructured.** The fit/min/max clamp path is already
+    correct; `maxZoom: 2.5` stays the default. "Zoom feels off" is dominated
     by unreadable labels; re-evaluate the single `maxZoom` value only at
     verification time if zoom-in still feels short — it is not a gated criterion.
   - Canvas-2D, raw CMS coords (`renderScale = 1`), Vitest node-env with the mocked
     2D canvas shim, dev/run on port 5080. Public layer/engine API stays intact.
   - **Out of scope:** wiring `labelFontSize` config→layer beyond the `#style`
-    block sunway already uses; activating the suppressed-label *fade* in the render
-    loop (ported as latent capability, as in sunway); any change to focus/route
+    block already in use; activating the suppressed-label *fade* in the render
+    loop (ported as latent capability); any change to focus/route
     label behavior.
 - **Decisions:**
-  - **Port sunway's screen-space, zoom-responsive font** — `fontSize =
+  - **Adopt a screen-space, zoom-responsive font** — `fontSize =
     base · √scale · dpr`, floored at `minFontSize · dpr`, drawn under the existing
     `1/scale` counter-scale so the label is constant screen size and grows by
     √scale. *Rejected:* keep the fixed world-space font and only raise the
     constant (still scales 1:1 with zoom, still no floor — the actual bug).
   - **Drop `_fitScale` from the render path** — label size is independent of unit
     polygon extents. *Rejected:* a hybrid that keeps the unit-shrink (tiny units
-    still get tiny labels; doesn't match sunway).
-  - **Port sunway's visibility caching + idle recompute + quantized text-metrics**
+    still get tiny labels).
+  - **Adopt visibility caching + idle recompute + quantized text-metrics**
     — recompute the visible/suppressed sets only on scale/rotation change; freeze
     during a zoom gesture (`beginZoom`/`endZoom`) and re-thin on idle via
     `invalidate`. *Rejected:* keep keppel's inline per-frame thinning (fine today,
@@ -57,21 +57,21 @@ folds into capabilities/map-labels.md (fix/amend, same slug). -->
 - **Module map:** all substantive change in `src/layers/LocationLayer.js`. Tests in
   `test/layers/MapLabels.test.js`. Doc note in `CLAUDE.md`. The durable record
   `capabilities/map-labels.md` is amended at cleanup (not now).
-- **Patterns:** mirror the reference `/Users/kegan/projects/webmap-sunwaymalls/src/
-  layers/LocationLayer.js` verbatim for the mechanism, **adapted to keppel's data
+- **Patterns:** implement the label mechanism in `src/layers/LocationLayer.js`
+  **adapted to keppel's data
   model** — keep keppel's node accessors (`#labelableNodesOnLevel()` over
   `store.locations[].displayNodes`, `node.labelable`, `node.levelCode`,
-  `node.text`), not sunway's (`store.nodes` / `n.location.kind` / `n.location.label`).
+  `node.text`).
 - **Integration seams:** none new. `renderWithContext(renderContext)` consumes the
   already-passed `{ ctx, dpr, scale, rotation, invalidate }`. `beginZoom()` /
   `endZoom()` implement the no-op hooks the engine already calls
   (`MapEngine.js:1077`/`1098`).
 - **Reuse:** the shared `computeVisibleRects` (`src/renderer/RectVisibility.js`) for
-  overlap thinning (sunway uses the same); the existing `1/scale` counter-scale and
+  overlap thinning; the existing `1/scale` counter-scale and
   rotation-flip logic already in `#drawLabel`; `labelFit.js` stays importable but
   unused by the layer.
 - **Cross-cutting tech-stack decisions:** none new — inherits the epic's Canvas-2D /
-  raw-coords / Vitest decisions. `--no-panel`: the design fork (port sunway fully vs
+  raw-coords / Vitest decisions. `--no-panel`: the design fork (full port vs
   hybrid vs tune-only) was resolved during brainstorming; the `code-explorer`
   diagnosis proved the root cause. A single grounded pass produced this *How*.
 
@@ -86,7 +86,7 @@ verification only; (d) suppressed-fade ported latent, not activated. -->
 - [x] `map-labels` `(ui)` — re-work LocationLayer label sizing: zoom-responsive
   screen-space font (`base·√scale·dpr` floored at `minFontSize·dpr`), drop the
   `_fitScale` unit-shrink, fix the `#screenRect` thinning-rect `/scale` mismatch,
-  and port sunway's visibility caching / idle-recompute / quantized-text-metrics +
+  and add visibility caching / idle-recompute / quantized-text-metrics +
   `beginZoom`/`endZoom`. · depends on: Phase-1 `destination-catalog`,
   `floor-rendering` (shipped); re-works shipped Phase-1 `map-labels`
 
@@ -157,7 +157,6 @@ layer's screen-rect path / `visibleLabels`. measureText in the shim is determini
   `minFontSize · dpr` floor keeps labels readable on mobile and at the fit zoom.
 - **Accessibility:** the canvas is decorative — label text mirrors the searchable
   `title`, which is the accessible path to every destination.
-- **Reference:** `/Users/kegan/projects/webmap-sunwaymalls/src/layers/
-  LocationLayer.js` (`#computeFontSize`, `#computeLabelVisibility`,
-  `#scheduleIdleRecompute`, `#measureText`/`#quantizeFontSize`, `#renderLabel`) —
-  the port source; reuse keppel's existing `computeVisibleRects` and counter-scale.
+- **Implementation:** add `#computeFontSize`, `#computeLabelVisibility`,
+  `#scheduleIdleRecompute`, `#measureText`/`#quantizeFontSize`, `#renderLabel` to
+  `LocationLayer.js`; reuse keppel's existing `computeVisibleRects` and counter-scale.

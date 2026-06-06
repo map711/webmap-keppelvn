@@ -155,7 +155,7 @@ export class Node {
  * (>=2 tenancies on one polygon) produces one Location per tenancy, each listing
  * the shared unit, so {@link LocationStore#getLocationsByUnitId} is one-to-many.
  *
- * Public seam preserved from the sunwaymalls shell: `locations`/`levels`
+ * Public seam preserved from the upstream shell: `locations`/`levels`
  * arrays, `getLocation`/`getLevel`/`getLevelByCode`/`getLocationsOnLevel`.
  */
 export class LocationStore {
@@ -534,7 +534,7 @@ export class LocationStore {
     this.locationsByUnitId = index;
   }
 
-  // ---- Legacy `{locations, levels, nodes}` payload (sunwaymalls shape) ----
+  // ---- Legacy `{locations, levels, nodes}` payload (upstream shape) ----
 
   #normalizeLegacyPayload(raw) {
     if (!raw || typeof raw !== 'object') return null;

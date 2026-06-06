@@ -36,7 +36,7 @@ suppression so labels read cleanly rather than colliding.
   (RectVisibility/rbush) path; when two boxes overlap the lower-priority (later)
   one is dropped. Candidates are ordered shorter-label-first, ties broken by unit
   id for determinism. Survivors are exposed via `visibleLabels` (a node-id set).
-- **Visibility caching + idle recompute (ported from sunwaymalls).** The thinning
+- **Visibility caching + idle recompute (ported from the upstream shell).** The thinning
   runs **only** when the `(scale, rotation)` cache key changed or a dirty flag is
   set — a repeat render at the same view is a **cache hit** (no recompute). A zoom
   gesture **freezes** the set: `beginZoom()` marks dirty and cancels any pending
@@ -73,15 +73,15 @@ suppression so labels read cleanly rather than colliding.
 
 ## Decisions & constraints
 
-- **Decision:** port sunwaymalls' screen-space zoom-responsive font
+- **Decision:** port the upstream screen-space zoom-responsive font
   (`base·√scale·dpr` floored at `minFontSize·dpr`) drawn under the existing
   `1/scale` counter-scale. *Rejected:* keep the fixed world-space font and only
   raise the constant — still scales 1:1 with zoom and still has no floor (the
   actual bug).
 - **Decision:** drop `_fitScale` from the render path — label size is independent
   of unit polygon extents. *Rejected:* a hybrid that keeps the unit-shrink (tiny
-  units still get tiny labels; doesn't match sunway).
-- **Decision:** port sunway's visibility caching + idle recompute + measured-rect
+  units still get tiny labels; doesn't match the upstream shell).
+- **Decision:** port the upstream visibility caching + idle recompute + measured-rect
   snapshot — recompute thinning only on scale/rotation change, freeze during a
   gesture, re-thin on idle via `invalidate`. *Rejected:* keep keppel's inline
   per-frame thinning (fine today, but the user wants headroom for growing label
