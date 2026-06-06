@@ -27,5 +27,10 @@ Project map + decisions live in `overview.md`; per-capability records in
   `SGC_v001.json`; put concrete counts in the synthetic **mini-bundle** fixture.
 - **Tests:** Vitest node-env; pure ports tested via mini-bundle, real 2 MB bundle
   only in opt-in smoke tests. Dev/run on **port 5080**.
-- **`src/navigation/` + route layers are Phase-2 scaffolding** carried from the
-  shell — not yet rebuilt over the navmesh. Don't treat them as live wayfinding.
+- **Routing never throws** — `PathFinder.findPath` always returns a typed
+  `RouteResult`; callers branch on `result.success` and read `code` on failure.
+  Route consumers read per-floor `segments`/`anchors`/`transitions`; never
+  synthesize a `Node[]` from the polyline.
+- **Connector kind slug is `'elevator'`, not `'lift'`.** The real bundle's
+  accessible connector is kind `elevator`; the `routeMode='lift'` toggle maps to
+  it. Don't assert `'lift'` as an emitted `transition.kind`.

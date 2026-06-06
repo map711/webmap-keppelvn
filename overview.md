@@ -13,10 +13,12 @@ build) is forked, but its data/render guts are replaced with logic ported from
 the `indoorcms-keppelvn` CMS so the engine can consume the CMS's published bundle
 `datas/SGC_v001.json` (GeoJSON-polygon units in raw coordinates + a navmesh +
 cross-floor transitions). The CMS is the *producer* of the bundle; this webmap is
-the *consumer*; the two meet only at `SGC_v001.json`. **Phase 1 ("Browse the
-map") is shipped:** a visitor can browse SGC's 5 floors, read shop labels, switch
-floors, search shops/facilities, and focus a shop by search or polygon tap.
-Routing/wayfinding is Phase 2.
+the *consumer*; the two meet only at `SGC_v001.json`. **Phases 1–2 are shipped:** a visitor can browse SGC's 5
+floors, read shop labels, switch floors, search shops/facilities, focus a shop by
+search or polygon tap (Phase 1), **and route destination → destination over the
+navmesh** — shortest funnel path, cross-floor, with escalator/lift preference,
+step-free gating, animated polyline, start/end pins, and tap-to-switch floor
+bubbles (Phase 2). Kiosk/share is Phase 3.
 
 ## Capabilities
 
@@ -29,6 +31,12 @@ Routing/wayfinding is Phase 2.
 | `floor-switching` `(ui)` | Level selector + `setFloor` swap geometry+labels and refit; `floor:changed` event; empty L1 + sparse B2/B1 | `capabilities/floor-switching.md` |
 | `destination-search` `(ui)` | Built-in search filters the catalog by title/tokens; results dropdown + info card | `capabilities/destination-search.md` |
 | `destination-focus` `(ui)` | `focusLocation` / polygon tap: switch floor + zoom + end pin; multi-tenant disambiguation; clear → browse | `capabilities/destination-focus.md` |
+| `navmesh-routing` | Triangle-A* + funnel string-pull over `navmesh_by_level`, cross-floor via `transitions`; per-floor polyline `segments` (no fake `Node[]`) | `capabilities/navmesh-routing.md` |
+| `route-preferences` | Escalator/lift **soft** cost penalty (`cost` vs `cost+100`) + step-free **hard** gate (`is_accessible` only); cache invalidates on mode change | `capabilities/route-preferences.md` |
+| `unroutable-level-handling` | Meshless/unknown/un-snappable/no-path return typed `{success:false, code}` without throwing; `route:error`; floor stays browseable | `capabilities/unroutable-level-handling.md` |
+| `route-rendering` `(ui)` | `NavigationLayer` animated per-floor polyline (grey full + black progress); re-slices on floor switch; engine frames start anchor | `capabilities/route-rendering.md` |
+| `route-markers` `(ui)` | `PinMarkerLayer` start/end pins + `NavMarkerLayer` floor-transition bubbles ("↑ Tap to L3") with `hitTest→levelCode` | `capabilities/route-markers.md` |
+| `search-to-route` `(ui)` | From/to search + connector toggles drive `navigateTo`; route/error in summary panel; public `element.navigateTo({from,to})` | `capabilities/search-to-route.md` |
 
 ## Constraints
 
@@ -58,11 +66,14 @@ Routing/wayfinding is Phase 2.
 
 ## Known-incomplete / carried forward
 
-- Phase 1 shipped **7/7 green, 0 blocked**. Routing (`navmesh-routing` et al.) is
-  **Phase 2** — `src/navigation/` (`PathFinder`, `RouteManager`, `MinHeap`) and
-  the route/marker layers (`NavigationLayer`, `NavMarkerLayer`) are carried over
-  from the shell but **not yet rebuilt over the bundle's navmesh**; treat them as
-  Phase-2 scaffolding, not active wayfinding.
+- Phase 1 shipped **7/7 green**; Phase 2 shipped **6/6 green, 0 blocked**.
+- **Live-browser smoke owed for the 3 Phase-2 `(ui)` capabilities** (`route-
+  rendering`, `route-markers`, `search-to-route`): chrome-devtools-mcp was locked
+  during the run, so each was QA'd **code-only** against the real layer + engine
+  stack. Run `/tars:review --ui` once the browser tool is free.
+- **Phase 3 (Kiosk & share)** not started — `kiosk-here`, `deep-link-state`,
+  `qr-share`, `brand-theming`. **You-are-here as a route start** is deferred here
+  (Phase-2 routing is destination → destination only).
 
 ---
 
@@ -74,11 +85,11 @@ Routing/wayfinding is Phase 2.
 |-----------|----------------|-----------------|
 | `src/data/` | Bundle load + index; destination catalog; geometry store; style cascade | `BundleLoader.js`, `LocationModel.js`, `MapGeometryModel.js`, `StyleResolver.js` |
 | `src/core/` | Engine orchestration (init/dispose/floor/focus), config, event bus | `MapEngine.js` |
-| `src/layers/` | Canvas layers: floor polygons, labels, pins (+ Phase-2 route layers) | `FloorLayer.js`, `LocationLayer.js`, `labelFit.js` |
+| `src/layers/` | Canvas layers: floor polygons, labels, route polyline, pins, transition bubbles | `FloorLayer.js`, `LocationLayer.js`, `NavigationLayer.js`, `PinMarkerLayer.js`, `NavMarkerLayer.js` |
 | `src/renderer/` | Render loop, transform pipeline, layer stack, rbush overlap | `Renderer.js`, `RectVisibility.js` |
 | `src/interaction/` | Gesture recognition + hit-test classification | `HitTestManager.js` |
 | `src/component/` | `<wayfinder-map>` Web Component + built-in UI controls | `WayfinderMap.js` |
-| `src/navigation/` | **Phase-2** routing (carried-over shell, not yet rebuilt) | `PathFinder.js`, `RouteManager.js` |
+| `src/navigation/` | Navmesh routing: triangle-A*, funnel string-pull, graph builder, route planner + state | `NavGraph.js`, `TriangleAStar.js`, `FunnelPath.js`, `PathFinder.js`, `RouteManager.js` |
 | `test/` | Vitest node-env suite + `fixtures/SGC_v001.json` real bundle | per-capability `*.test.js` |
 | `demo/` | Static showcase pages for the Phase-1 browse capabilities (bare / default-controls / `focus-shop-id` / theme) + per-demo guide | `index.html` |
 
@@ -110,8 +121,20 @@ Routing/wayfinding is Phase 2.
 ### Bus event → DOM event re-emit
 - **Where used:** `WayfinderMap.#wireEvents` maps `floor:changed`→`floor-changed`,
   `data:loaded`→`data-loaded`, `tap:location`→`location-tap`,
-  `tap:disambiguate`→`location-disambiguate`.
+  `tap:disambiguate`→`location-disambiguate`, and the route events
+  `route:found`→`route-found`, `route:cleared`→`route-cleared`,
+  `route:error`→`route-error`.
 - **When to use:** exposing any new engine event to host-page listeners.
+
+### Typed route result (segments, never `Node[]`)
+- **Where used:** `PathFinder.findPath` → `RouteResult` consumed by
+  `NavigationLayer` / `PinMarkerLayer` / `NavMarkerLayer` and `RouteManager`.
+- **Example:** `{ success, segments: Map<levelCode,[x,y][]>, transitions[],
+  distance, startAnchor, endAnchor, startLocation, endLocation }`; a failure
+  carries `code` instead. The router **never throws** — callers branch on
+  `success`.
+- **When to use:** any route consumer — read per-floor `segments`/`anchors`/
+  `transitions`; never synthesize a node graph from the polyline.
 
 ## Reusable utilities
 
@@ -121,6 +144,9 @@ Routing/wayfinding is Phase 2.
 | `geometryToPoints(geometry)` | `src/data/MapGeometryModel.js` | GeoJSON ring → `Point[]` (drop closing vertex) |
 | `_fitScale(...)` | `src/layers/labelFit.js` | shrink-to-fit scalar, clamped at 1 |
 | `computeVisibleRects(rects)` | `src/renderer/RectVisibility.js` | rbush screen-rect overlap suppression |
+| `buildNavGraph(levels, transitions)` | `src/navigation/NavGraph.js` | per-meshed-level graph + parsed `RouteTransition[]` (meshless omitted) |
+| `triangleAStar` / `findNearestTriangle` | `src/navigation/TriangleAStar.js` | triangle-adjacency A* + point→triangle snap |
+| `funnelPath(triPath, mesh, start, end)` | `src/navigation/FunnelPath.js` | string-pull a triangle corridor → shortest `[x,y][]` |
 | `sortFloorCodesByPosition(codes, levels)` | `src/component/controls/levelOrder.js` | order floors by `Level.position` |
 
 ## Integration seams
@@ -136,6 +162,10 @@ Routing/wayfinding is Phase 2.
    `tap:location` / `tap:disambiguate` / `tap:floor`.
 4. **Exposing an engine event to the host page:** add a bus→DOM entry in
    `WayfinderMap.#wireEvents`.
+5. **Building the routing graph:** `MapEngine.#createNavigationSystem` is the
+   **only** wiring point — `navGraph = mapGeometryStore.buildNavGraph(bundleModel.
+   transitions)`, passed (+ `locationStore` for id→unit→snap) to `PathFinder`.
+   Built from the already-parsed `BundleModel` (one fetch); no new store.
 
 ## Tech-stack decisions
 
@@ -148,6 +178,12 @@ Routing/wayfinding is Phase 2.
 - **String-namespaced ids** `shop:<id>` / `unit:<id>` — rejected numeric offsets.
 - **Unit-aware floor hit-test** (per-unit polygons retain `unitId`) — rejected
   style-grouped meshes.
+- **Route result = per-floor polyline `segments` + `transitions` + anchors** —
+  rejected synthesizing fake `Node[]` (breaks consumers + the cross-floor split).
+- **True funnel (string-pull) path** over triangle-A* — rejected centroid-hop
+  (zig-zags; not the indoorcms behavior).
+- **Soft connector penalty + hard step-free gate** — rejected hard-filter by kind
+  (returns *no route* on a single-connector floor).
 - **Build:** Rollup → ESM/UMD/min. **Test:** Vitest node-env, pure ports driven
   by a synthetic mini-bundle; the real 2 MB bundle only in opt-in smoke tests.
   **Dev/run:** port 5080.
