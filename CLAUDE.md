@@ -33,16 +33,16 @@ Project map + decisions live in `overview.md`; per-capability records in
   read from disk; only `buildInfra.test.js` shells out, to run the real `rollup`.
 - **Never run `npm run dev` from an agent/QA path — use `npm run dev:ensure`.**
   The dev server is the ownership-aware `.dev/` harness (zero-dep node server).
-  `npm run dev` = `owner=human` (what the user leaves running; serves :5080,
+  `npm run dev` = `owner=human` (what the user leaves running; serves :5010,
   live-reload, spawns `rollup -c -w`). `dev:ensure` reuses a running server or
   starts a detached `owner=agent` one; `dev:stop` **refuses to stop a human
   server** without `--force`; a later `npm run dev` reclaims an agent-held port.
   This is the "don't kill my `npm run dev`" guarantee — don't reintroduce a path
-  that binds :5080 directly or SIGTERMs by port. The harness recognises its own
+  that binds :5010 directly or SIGTERMs by port. The harness recognises its own
   servers via `/__dev/health` (sentinel `keppelvn-dev`); a foreign process on
-  :5080 makes it fail fast, not kill.
-- **Dev/run on port 5080, overridable via `$PORT`** (or `.dev/config.json`).
-  Override so a second fork — or a server already holding 5080 — coexists:
+  :5010 makes it fail fast, not kill.
+- **Dev/run on port 5010, overridable via `$PORT`** (or `.dev/config.json`).
+  Override so a second fork — or a server already holding 5010 — coexists:
   `PORT=5081 npm run dev`. `resolvePort()` reads `$PORT` over config.
 - **`npm test` must never touch the dev server's `dist/`.** A live `npm run dev`
   owns `dist/` (`rollup -w` writes it, the harness serves it). The build-infra

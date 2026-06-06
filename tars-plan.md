@@ -30,7 +30,7 @@ folds into capabilities/map-labels.md (fix/amend, same slug). -->
     by unreadable labels; re-evaluate the single `maxZoom` value only at
     verification time if zoom-in still feels short — it is not a gated criterion.
   - Canvas-2D, raw CMS coords (`renderScale = 1`), Vitest node-env with the mocked
-    2D canvas shim, dev/run on port 5080. Public layer/engine API stays intact.
+    2D canvas shim, dev/run on port 5010. Public layer/engine API stays intact.
   - **Out of scope:** wiring `labelFontSize` config→layer beyond the `#style`
     block already in use; activating the suppressed-label *fade* in the render
     loop (ported as latent capability); any change to focus/route

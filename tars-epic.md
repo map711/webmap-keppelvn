@@ -18,7 +18,7 @@ Resolved once here (via the epic-scope design panel: reuse-first spine + clean-s
 - **Floor hit-testing** — the floor layer is **unit-aware**: each unit polygon draws with its own resolved style and retains its `unitId`, so `hitTest` returns a `unitId` → enabling "tap a shop polygon to select it" (the indoorcms behavior). Rejected: style-grouped meshes (lose per-unit identity, no polygon tap-to-select).
 - **Meshless level (L1)** — L1 renders, browses, and searches normally; only *routing* to/from/through it returns a structured error. The floor stays visible in the selector. Rejected: hide L1, or fake a detour transition.
 - **Testing** — Vitest node-env. Drive deterministic unit tests of the pure ports (loader, style cascade, label fit, navmesh router) from a hand-authored **synthetic mini-bundle fixture** (2 levels incl. a meshless case, shops + escalator + elevator + 1 transition, a tiny navmesh with known triangles). The real 2 MB `SGC_v001.json` is exercised only in one opt-in/slow integration smoke test. Rejected: the real bundle in every test (slow, non-deterministic, hard to assert).
-- **Dev / build / run** — dev server and local run on **port 5080** (the `concurrently` dev script's `http-server -p 5080`). Build stays Rollup → ESM/UMD/min; deploy config (DO Spaces) is inherited as-is, not a build target this epic.
+- **Dev / build / run** — dev server and local run on **port 5010** (the `concurrently` dev script's `http-server -p 5010`). Build stays Rollup → ESM/UMD/min; deploy config (DO Spaces) is inherited as-is, not a build target this epic.
 
 ## Phases
 
@@ -29,7 +29,7 @@ Resolved once here (via the epic-scope design panel: reuse-first spine + clean-s
 ## Dependency tree
 
 ```
-map-bootstrap                         (fork shell + single-bundle load + index + engine init + run@5080)
+map-bootstrap                         (fork shell + single-bundle load + index + engine init + run@5010)
 ├── destination-catalog               (shops+facilities → Location catalog)
 │   └── destination-search (ui)       (depends on map-labels too)
 ├── floor-rendering (ui)              (per-unit polygons + style cascade + hit-test)

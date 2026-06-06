@@ -24,7 +24,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 
 | Capability | Does | Record |
 |------------|------|--------|
-| `map-bootstrap` | Fork the shell; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test + ownership-aware dev harness on :5080 + gallery build/deploy | `capabilities/map-bootstrap.md` |
+| `map-bootstrap` | Fork the shell; single `data-url` fetch + parse + index of `SGC_v001.json`; engine init; build/test + ownership-aware dev harness on :5010 + gallery build/deploy | `capabilities/map-bootstrap.md` |
 | `destination-catalog` | `LocationStore` builds the placed-shop + facility destination catalog (multi-tenant/multi-unit aware; one-to-many `unitId→Location`) | `capabilities/destination-catalog.md` |
 | `floor-rendering` `(ui)` | Unit-aware `FloorLayer`: per-unit polygons, `unit→layer→kind` style cascade, `getBounds()` fallback, `hitTest→unitId` | `capabilities/floor-rendering.md` |
 | `map-labels` `(ui)` | `LocationLayer` draws labelable-unit labels at `label_point`/`label_rotation`, zoom-responsive screen-space font (`max(minFontSize·dpr, fontSize·√scale·dpr)`) + cached overlap suppression with zoom-freeze/idle-recompute | `capabilities/map-labels.md` |
@@ -48,7 +48,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
   Raw CMS coordinates, `renderScale = 1`.
 - Public component/engine API + built-in UI from the shell stay intact so Phase
   2/3 features drop in.
-- Dev server + local run on **port 5080**.
+- Dev server + local run on **port 5010**.
 
 ## Decisions
 
@@ -192,7 +192,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
   DigitalOcean Spaces (`.env`-driven). **Test:** Vitest node-env, pure ports
   driven by a synthetic mini-bundle; the real 2 MB bundle only in opt-in smoke
   tests; the suite binds no port. **Dev/run:** ownership-aware `.dev/` harness on
-  port 5080 (`$PORT`-overridable) — won't kill a human's `npm run dev`.
+  port 5010 (`$PORT`-overridable) — won't kill a human's `npm run dev`.
 
 ## UI/UX patterns
 

@@ -2,14 +2,14 @@
 //
 // Build / test / dev infrastructure contract (criterion 6). The shell must ship a
 // build that emits the three dist bundles, a Vitest test script, and a dev setup
-// that serves on port 5080.
+// that serves on port 5010.
 //
 // The dev setup is the ownership-aware `.dev/` harness (a zero-dep node server),
 // NOT a plain http-server. Its whole reason to exist is the survival guarantee:
 // an agent/QA run must never kill the human's `npm run dev`. So this gate asserts
 //   - `dev` launches the harness server (.dev/server.mjs, owner=human);
 //   - `dev:ensure` / `dev:stop` / `dev:status` are wired to the harness;
-//   - the harness pins port 5080, overridable via $PORT;
+//   - the harness pins port 5010, overridable via $PORT;
 //   - `dev:stop` refuses to stop a non-agent (human) server without --force —
 //     the actual "don't kill my dev server" guarantee, asserted on the shipped
 //     artifact since there is no port-free behavioral check (no test binds a port);
@@ -80,15 +80,15 @@ describe('map-bootstrap: build/test/dev infrastructure', () => {
     }
   });
 
-  it('the harness pins port 5080 and honours $PORT (no port binding)', async () => {
+  it('the harness pins port 5010 and honours $PORT (no port binding)', async () => {
     const cfg = JSON.parse(readFileSync(join(repoRoot, '.dev', 'config.json'), 'utf8'));
-    expect(cfg.port, 'config.json must pin port 5080').toBe(5080);
+    expect(cfg.port, 'config.json must pin port 5010').toBe(5010);
 
     const { resolvePort } = await import(join(repoRoot, '.dev', '_shared.mjs'));
     const saved = process.env.PORT;
     try {
       delete process.env.PORT;
-      expect(resolvePort()).toBe(5080); // falls back to config.json
+      expect(resolvePort()).toBe(5010); // falls back to config.json
       process.env.PORT = '6123';
       expect(resolvePort()).toBe(6123); // $PORT wins, so a fork can coexist
     } finally {
@@ -153,7 +153,7 @@ describe('map-bootstrap: build/test/dev infrastructure', () => {
     // passing it (a config that "looks right" but cannot build is not a deliverable).
     //
     // Coexistence contract: a running `npm run dev` OWNS dist/ — `rollup -w` writes
-    // it and the harness serves it on :5080. So this gate must verify the build
+    // it and the harness serves it on :5010. So this gate must verify the build
     // WITHOUT deleting or rewriting that shared dist/. Otherwise every `vitest run`
     // during a tars:run rm -rf's the dir the watcher is mid-write on and races a
     // second rollup over the same files — blanking the served bundles and killing

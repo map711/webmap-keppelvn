@@ -8,7 +8,7 @@ live in [`overview.md`](overview.md); per-capability records in
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Start the dev harness (`owner=human`): static server on :5080, live-reload, and `rollup -c -w` rebuilding `dist/`. Leave this running. |
+| `npm run dev` | Start the dev harness (`owner=human`): static server on :5010, live-reload, and `rollup -c -w` rebuilding `dist/`. Leave this running. |
 | `npm run dev:ensure` | Make sure a dev server is up **without disturbing one that already is** — reuses a running server, or starts a detached `owner=agent` one. Use this from scripts / Claude Code / QA. |
 | `npm run dev:stop` | Stop an **agent-owned** dev server. Refuses to stop your `owner=human` server unless `--force`. |
 | `npm run dev:status` | Print what the harness thinks is running and who owns it. |
@@ -20,7 +20,7 @@ live in [`overview.md`](overview.md); per-capability records in
 ## The dev harness won't kill your `npm run dev`
 
 `npm run dev` starts a small zero-dependency server (`.dev/server.mjs`) tagged
-`owner=human`. It serves the repo on :5080, injects a live-reload client into
+`owner=human`. It serves the repo on :5010, injects a live-reload client into
 HTML responses (edits to `dist/`, `demo/`, or `datas/` reload the page; `src/`
 edits rebuild `dist/` via the spawned `rollup -c -w`, which then reloads), and is
 **the thing you leave running**.
@@ -32,31 +32,31 @@ never `npm run dev`:
 - If nothing is up, `dev:ensure` starts a **detached `owner=agent`** server.
 - `npm run dev:stop` only stops an `owner=agent` server; it **refuses to stop
   your human server** without `--force`.
-- If you later run `npm run dev` while an agent server holds :5080, the human
+- If you later run `npm run dev` while an agent server holds :5010, the human
   server **reclaims** the port (so you get live-reload back).
 
 The harness identifies its own servers via a health endpoint
 (`/__dev/health`, sentinel `keppelvn-dev`), so it never mistakes a foreign
-process for a dev server — and if :5080 is held by something that isn't ours, it
+process for a dev server — and if :5010 is held by something that isn't ours, it
 fails fast rather than killing it.
 
 ## Port convention
 
-The dev server runs on **port 5080** by default, overridable via `PORT` (or
+The dev server runs on **port 5010** by default, overridable via `PORT` (or
 `.dev/config.json`):
 
 ```sh
-npm run dev            # serves on http://localhost:5080
+npm run dev            # serves on http://localhost:5010 (demos at /demo/)
 PORT=5081 npm run dev  # serves on http://localhost:5081
 ```
 
-Override the port when 5080 is already taken so the second instance binds a free
+Override the port when 5010 is already taken so the second instance binds a free
 port instead of failing.
 
 ## `npm test` and `npm run dev` coexist
 
 The test suite **binds no port** — `fetch` is mocked and fixtures are read from
-disk — so it never collides with a running dev server on 5080.
+disk — so it never collides with a running dev server on 5010.
 
 The one place the two could clash is `dist/`: a live `npm run dev` owns it
 (`rollup -w` writes it, the harness serves it). To avoid a collision, the

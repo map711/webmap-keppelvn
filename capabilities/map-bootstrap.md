@@ -8,7 +8,7 @@ upstream Canvas-2D shell and feeding it the single CMS bundle
 capability builds on: one `data-url` fetch → parse → index of the self-contained
 bundle, engine initialization over the indexed model, and the build/test/dev/
 deploy infrastructure (Rollup bundles, Vitest suite, an ownership-aware `.dev/`
-dev-server harness on port 5080, and a gallery build + DigitalOcean-Spaces deploy).
+dev-server harness on port 5010, and a gallery build + DigitalOcean-Spaces deploy).
 
 ## Behavior
 
@@ -42,14 +42,14 @@ dev-server harness on port 5080, and a gallery build + DigitalOcean-Spaces deplo
 - `npm test` runs Vitest (`vitest run`), which **binds no port** (fetch mocked,
   fixtures read from disk) — so it never collides with a live dev server.
 - The dev server is the zero-dependency **ownership-aware `.dev/` harness**, not
-  `http-server`. `npm run dev` starts an `owner=human` server on :5080 (static
+  `http-server`. `npm run dev` starts an `owner=human` server on :5010 (static
   serve + live-reload injection + a spawned `rollup -c -w`) — what the user leaves
   running. Automated paths use `npm run dev:ensure`, which reuses a running server
   or starts a detached `owner=agent` one; `npm run dev:stop` refuses to stop a
   human server without `--force`; a later `npm run dev` reclaims an agent-held
   port. The harness recognises its own servers via `/__dev/health` (sentinel
-  `keppelvn-dev`); a foreign process on :5080 makes it fail fast, never kill.
-  Port is 5080 by default, overridable via `$PORT` (read over `.dev/config.json`
+  `keppelvn-dev`); a foreign process on :5010 makes it fail fast, never kill.
+  Port is 5010 by default, overridable via `$PORT` (read over `.dev/config.json`
   by `resolvePort()`).
 
 ## Interfaces & contracts
@@ -101,7 +101,7 @@ dev-server harness on port 5080, and a gallery build + DigitalOcean-Spaces deplo
 - **Decision:** the build-infra test builds into an isolated temp dir via
   `WAYFINDER_BUILD_OUT_DIR` (rollup reads it; default `dist`) and asserts a
   `dist/` sentinel survives — rejected: `rmSync(dist) + rollup -c`, which races a
-  live `rollup -w` mid-write on the dir the harness is serving on :5080.
+  live `rollup -w` mid-write on the dir the harness is serving on :5010.
 - **Invariant:** `npm test` never touches a live dev server's `dist/`; the test
   suite binds no port.
 
@@ -115,7 +115,7 @@ dev-server harness on port 5080, and a gallery build + DigitalOcean-Spaces deplo
 - `test/build/buildInfra.test.js` — `build` runs rollup **and** stages the
   gallery; `test` runs Vitest; `dev`/`dev:ensure`/`dev:stop`/`dev:status` wire the
   ownership-aware harness; `deploy` wires `scripts/deploy.js`; the harness ships
-  all its `.dev/` modules; `config.json` pins 5080 and `resolvePort()` honours
+  all its `.dev/` modules; `config.json` pins 5010 and `resolvePort()` honours
   `$PORT` (no port binding); `dev:stop` refuses a human server without `--force`;
   live-reload injection is idempotent; `rollup.config.js` emits ESM + UMD + min;
   and a real `rollup` build into a temp `WAYFINDER_BUILD_OUT_DIR` emits non-empty
