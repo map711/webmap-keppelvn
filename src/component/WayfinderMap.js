@@ -3477,8 +3477,18 @@ class WayfinderMapElement extends HTMLElement {
   }
 
   #pickLocationNode(location) {
-    if (!location?.nodes?.length) return null;
     const currentFloor = this.#engine?.getCurrentFloor?.();
+    // The SGC destination catalog places geometry on `displayNodes` (keyed by
+    // `levelCode`); the legacy `{nodes}` payload is the sunwaymalls fallback. Mirror
+    // LocationModel.getNodesOnLevel: prefer displayNodes, else legacy nodes.
+    const displayNodes = Array.isArray(location?.displayNodes) ? location.displayNodes : [];
+    if (displayNodes.length) {
+      const onCurrent = currentFloor
+        ? displayNodes.find((n) => n.levelCode === currentFloor)
+        : null;
+      return onCurrent || displayNodes[0] || null;
+    }
+    if (!location?.nodes?.length) return null;
     const onCurrent = currentFloor
       ? location.nodes.find((n) => n.level?.code === currentFloor)
       : null;
@@ -3495,7 +3505,7 @@ class WayfinderMapElement extends HTMLElement {
     }
     if (!targetNode?.point) return;
 
-    const floorCode = targetNode.level?.code;
+    const floorCode = targetNode.level?.code ?? targetNode.levelCode;
     const currentFloor = this.#engine.getCurrentFloor?.();
     if (floorCode && floorCode !== currentFloor) {
       // centerOn pans to the target below; skip the floor-switch refit.

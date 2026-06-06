@@ -854,5 +854,59 @@ describe('search-to-route: from/to search + connector toggles drive navigateTo',
       expect(navLayerState.setPaths.length).toBe(0);
     });
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Regression — the locate-rail "walk" (locate-start) and "pin" (locate-focus)
+  // buttons recenter the camera on the route's start / destination shop. The
+  // route RESULT carries no start/end Node (only anchors + the start/end
+  // Location), so #centerOnTarget resolves the shop's node from the Location.
+  // The SGC catalog populates `displayNodes`, NOT the legacy `nodes` array;
+  // reading the empty legacy array left BOTH buttons inert in navigation mode
+  // (the live bug). These drive the REAL buttons over the REAL engine and assert
+  // the camera recenters on the shop's display-node point.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('locate rail: start/destination recenter buttons', () => {
+    function locateButton(shadow, action) {
+      const btn = shadow.querySelectorAll('button').find((b) => b.dataset.action === action);
+      expect(btn, `a "${action}" button must exist on the locate rail`).toBeTruthy();
+      return btn;
+    }
+    function displayPoint(el, id, levelCode) {
+      const loc = el.getLocation(id);
+      expect(loc, `location ${id} must resolve from the catalog`).toBeTruthy();
+      const nodes = Array.isArray(loc.displayNodes) ? loc.displayNodes : [];
+      const node = nodes.find((n) => n.levelCode === levelCode) ?? nodes[0];
+      expect(node?.point, `location ${id} must carry a display-node point`).toBeTruthy();
+      return node.point;
+    }
+
+    it('locate-start recenters the camera on the start shop display node', async () => {
+      const { el, engine, shadow } = await mountRealEngineComponent();
+      expect(el.navigateTo({ from: SHOP_A_ID, to: SHOP_B_ID }).success).toBe(true);
+
+      const centerSpy = vi.spyOn(engine, 'centerOn');
+      clickButton(locateButton(shadow, 'locate-start'));
+
+      expect(centerSpy, 'locate-start must drive a camera recenter').toHaveBeenCalled();
+      const [x, y] = centerSpy.mock.calls[centerSpy.mock.calls.length - 1];
+      const p = displayPoint(el, SHOP_A_ID, 'F1');
+      expect(x).toBeCloseTo(p.x, 3);
+      expect(y).toBeCloseTo(p.y, 3);
+    });
+
+    it('locate-focus recenters the camera on the destination shop display node', async () => {
+      const { el, engine, shadow } = await mountRealEngineComponent();
+      expect(el.navigateTo({ from: SHOP_A_ID, to: SHOP_B_ID }).success).toBe(true);
+
+      const centerSpy = vi.spyOn(engine, 'centerOn');
+      clickButton(locateButton(shadow, 'locate-focus'));
+
+      expect(centerSpy, 'locate-focus must drive a camera recenter').toHaveBeenCalled();
+      const [x, y] = centerSpy.mock.calls[centerSpy.mock.calls.length - 1];
+      const p = displayPoint(el, SHOP_B_ID, 'F2');
+      expect(x).toBeCloseTo(p.x, 3);
+      expect(y).toBeCloseTo(p.y, 3);
+    });
+  });
 });
 // <<< TARS cap:search-to-route
