@@ -91,6 +91,13 @@ export class HitTestManager {
    * @returns {{type:string, locations:Array}}
    */
   #classifyHit(result) {
+    // A connector-bubble hit is self-describing — route it to the
+    // floor-transition handler before the unit-id path (a bare floor-code
+    // string would otherwise be misread as a unit id).
+    if (result && result.type === 'floor-transition') {
+      return { type: 'floor-transition', locations: [] };
+    }
+
     const unitId = this.#extractUnitId(result);
 
     if (unitId != null) {

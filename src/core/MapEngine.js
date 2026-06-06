@@ -219,10 +219,11 @@ export class MapEngine {
     this.#pinMarkerLayer.setFloor(floorCode);
     this.#navMarkerLayer.setFloor(floorCode);
 
-    // Refit the view whenever the active level actually changes (the headline
-    // "one tap switches floors with a quick refit" behaviour), as well as on the
-    // initial load. Navigation/focus call sites that pan to a target instead opt
-    // out by passing { fitToBounds: false }.
+    // Fit the view on the INITIAL load only. A user-initiated floor switch — the
+    // level selector and connector-pin (floor-transition) taps — preserves the
+    // current zoom/pan/rotation so the user keeps spatial context across levels;
+    // those call sites, like the navigation/focus pan paths, pass
+    // { fitToBounds: false }. An explicit { fitToBounds: true } still refits.
     if (!previousFloor || (options.fitToBounds !== false && previousFloor !== floorCode)) {
       const bounds = this.#floorLayer.getBounds();
       if (bounds) {
@@ -974,8 +975,11 @@ export class MapEngine {
       this.#locationStore
     );
 
-    this.#hitTestManager.registerHandler('floor-transition', (targetFloor) => {
-      this.setFloor(targetFloor);
+    this.#hitTestManager.registerHandler('floor-transition', (result) => {
+      // Tapping a connector bubble switches levels but KEEPS the current view
+      // (zoom/pan/rotation) so the user doesn't lose spatial context — same opt-out
+      // the navigation/focus pan paths use.
+      this.setFloor(result.targetFloor, { fitToBounds: false });
     });
   }
 

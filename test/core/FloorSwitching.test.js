@@ -107,7 +107,12 @@ vi.mock('../../src/interaction/GestureRecognizer.js', () => ({
   GestureRecognizer: class { dispose() {} }
 }));
 vi.mock('../../src/interaction/HitTestManager.js', () => ({
-  HitTestManager: class { registerHandler() {} }
+  HitTestManager: class {
+    registerHandler(type, fn) {
+      renderState.handlers = renderState.handlers || {};
+      renderState.handlers[type] = fn;
+    }
+  }
 }));
 vi.mock('../../src/layers/PinMarkerLayer.js', () => ({
   PinMarkerLayer: class {
@@ -211,6 +216,7 @@ describe('floor-switching: engine floor selection over real stores + layers', ()
     renderState.fits = [];
     renderState.renders = 0;
     renderState.addedLayers = [];
+    renderState.handlers = {};
   });
 
   afterEach(() => {
@@ -307,11 +313,11 @@ describe('floor-switching: engine floor selection over real stores + layers', ()
       expect(bounds.height).toBeCloseTo(4478.24524562068, 2);
     });
 
-    it("a plain setFloor('L2') with NO options refits to L2 bounds (the path the level selector UI uses)", async () => {
+    it('a plain setFloor (no options) still refits — the programmatic/initial-load contract', async () => {
       const engine = await createInitializedEngine();
       renderState.fits = [];
-      // No options — exactly what WayfinderMap.#handleLevelSelectorClick passes
-      // when a user taps a floor button. A user-initiated switch must refit.
+      // The engine's DEFAULT remains "fit on a real floor change". Only the
+      // user-facing switch call sites opt out (see the two tests below).
       engine.setFloor('L2');
 
       const bounds = renderState.fits[renderState.fits.length - 1];
@@ -320,11 +326,23 @@ describe('floor-switching: engine floor selection over real stores + layers', ()
       expect(bounds.height).toBeCloseTo(4478.24524562068, 2);
     });
 
-    it('an explicit { fitToBounds: false } opts the navigation/focus pan path out of the refit', async () => {
+    it('a connector-pin (floor-transition) tap PRESERVES the view — switches level with no refit', async () => {
       const engine = await createInitializedEngine();
       renderState.fits = [];
+      // Fire the exact handler MapEngine registers for connector-bubble taps.
+      // A user must not lose zoom/pan/rotation context when stepping between levels.
+      renderState.handlers['floor-transition']({ targetFloor: 'L2' });
+
+      expect(engine.getCurrentFloor(), 'the connector tap still switches the active level').toBe('L2');
+      expect(renderState.fits, 'a connector-pin switch must NOT refit — the view is preserved').toEqual([]);
+    });
+
+    it('an explicit { fitToBounds: false } opts the level-selector / navigation / focus paths out of the refit', async () => {
+      const engine = await createInitializedEngine();
+      renderState.fits = [];
+      // The level-selector tap and the pan-to-target call sites all switch floors
+      // but suppress the refit to keep the current view.
       engine.setFloor('L2', { fitToBounds: false });
-      // Pan-to-target call sites switch floors but suppress the refit.
       expect(renderState.fits).toEqual([]);
     });
 

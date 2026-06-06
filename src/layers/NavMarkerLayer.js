@@ -136,11 +136,14 @@ export class NavMarkerLayer extends Layer {
   }
 
   /**
-   * Hit test at world coordinates. Returns the target level code to switch to
-   * when the tap lands on a rendered bubble; `null` otherwise.
+   * Hit test at world coordinates. Returns a self-describing floor-transition
+   * hit (`{type:'floor-transition', targetFloor}`) when the tap lands on a
+   * rendered bubble; `null` otherwise. The tag lets {@link HitTestManager} tell
+   * a connector bubble apart from a bare unit-id hit (a plain floor-code string
+   * would be misread as a unit id and never switch the floor).
    * @param {number} worldX
    * @param {number} worldY
-   * @returns {string|null}
+   * @returns {{type:'floor-transition', targetFloor:string}|null}
    */
   hitTest(worldX, worldY) {
     if (!this.visible || !this.#pathResult || !this.#currentLevelCode) return null;
@@ -162,7 +165,7 @@ export class NavMarkerLayer extends Layer {
 
       if (localX >= bx && localX <= bx + bubble.width &&
         localY >= by && localY <= by + bubble.height) {
-        return bubble.targetLevel;
+        return { type: 'floor-transition', targetFloor: bubble.targetLevel };
       }
     }
 
@@ -227,7 +230,7 @@ export class NavMarkerLayer extends Layer {
       return {
         anchorX: from.x,
         anchorY: from.y,
-        label: `${arrow} ${toLevel}`,
+        label: `${arrow} Tap to ${toLevel}`,
         targetLevel: toLevel
       };
     }
@@ -239,7 +242,7 @@ export class NavMarkerLayer extends Layer {
       return {
         anchorX: to.x,
         anchorY: to.y,
-        label: `${arrow} ${fromLevel}`,
+        label: `${arrow} Tap to ${fromLevel}`,
         targetLevel: fromLevel
       };
     }

@@ -21,7 +21,10 @@ Project map + decisions live in `overview.md`; per-capability records in
   / `map-url` gate is the "component never mounts, labels render nothing" bug.
 - **`setFloor` refits by default**; internal pan paths pass `{fitToBounds:false}`.
   Re-derive `minScale` on every refit (a stale `minScale` after a tiny floor
-  blocks focus zoom-in).
+  blocks focus zoom-in). **But the user-facing switch paths — level-selector tap
+  and connector-pin (floor-transition) tap — also pass `{fitToBounds:false}`** to
+  hold zoom/pan/rotation across levels; only the initial load (or an explicit
+  `{fitToBounds:true}`) reframes. A user floor-tap must NOT refit.
 - **Bundle counts are seed-sparse:** 20 shops but only 5 placed (all L3); L1 is
   meshless **and** unit-less. Assert data-driven *rules* against the real
   `SGC_v001.json`; put concrete counts in the synthetic **mini-bundle** fixture.
@@ -45,6 +48,11 @@ Project map + decisions live in `overview.md`; per-capability records in
   polyline with a terminal leg from the door to that same shop anchor (start
   prepend / end append) so the line meets the pin — the navmesh `segments` stay
   door-to-door for distance/funnel; only the drawn line gets the cosmetic leg.
+- **Connector-bubble hits are self-describing.** `NavMarkerLayer.hitTest` returns
+  `{type:'floor-transition', targetFloor}` (never a bare level string — that gets
+  misread as a unit id and the tap silently no-ops). `HitTestManager.#classifyHit`
+  short-circuits on `result.type === 'floor-transition'` **before** unit-id
+  extraction. Don't collapse `hitTest` back to a plain code.
 - **Label font is screen-space `max(minFontSize·dpr, fontSize·√scale·dpr)`**,
   applied once to `ctx.font` then counter-scaled by `1/scale` — a `minFontSize·dpr`
   FLOOR with √scale growth above it. There is **no `_fitScale` unit-shrink** (the

@@ -3,9 +3,11 @@
 ## Purpose
 
 Let a visitor switch between SGC's 5 floors. The engine's floor selection swaps
-the active level's geometry + labels and refits the view; the level selector
-lists the floors in physical order. Every floor is selectable — including the
-empty L1 and the sparse B2/B1.
+the active level's geometry + labels; the level selector lists the floors in
+physical order. A user-initiated switch **preserves the current view** (zoom /
+pan / rotation) so spatial context carries across levels; only the initial load
+(and explicit programmatic calls) refit. Every floor is selectable — including
+the empty L1 and the sparse B2/B1.
 
 ## Behavior
 
@@ -15,13 +17,16 @@ empty L1 and the sparse B2/B1.
   falling back to input order when `position` is absent.
 - `setFloor(code)` makes `code` the active rendered level: it pushes the level's
   `MapLevel` into the floor layer and calls `setFloor(code)` on the location /
-  navigation / pin / nav-marker layers, sets `currentFloor === code`, **refits**
-  the view to the new level's bounds, and emits `floor:changed` `{floor: code}`
-  — re-emitted by the component as the `floor-changed` DOM event.
-- Refit happens by default on a floor change (`options.fitToBounds !== false`);
-  internal pan paths opt out with `{fitToBounds:false}`. This fixed a
-  green-but-wrong where `setFloor` only refit on first load, so a UI floor-tap
-  never refit.
+  navigation / pin / nav-marker layers, sets `currentFloor === code`, conditionally
+  refits the view to the new level's bounds, and emits `floor:changed`
+  `{floor: code}` — re-emitted by the component as the `floor-changed` DOM event.
+- **Refit policy.** The engine refits on the **initial load** (`!previousFloor`)
+  or on an explicit `{fitToBounds:true}` floor change; `{fitToBounds:false}`
+  always suppresses it. The two **user-facing** switch paths — the level-selector
+  tap (`WayfinderMap.#handleLevelSelectorClick`) and the connector-pin
+  (floor-transition) tap — both pass `{fitToBounds:false}` to **keep the current
+  view**, joining the navigation/focus pan paths. The engine's own default
+  (refit on a real floor change) is unchanged; only those call sites opt out.
 - On load, `default-floor` (if set) is the active floor; unset → the first floor
   by the engine's priority. Selecting **L1** activates it without error and
   renders its (empty, 0-unit) geometry, still framing sensibly via the
@@ -46,20 +51,27 @@ empty L1 and the sparse B2/B1.
 
 ## Decisions & constraints
 
-- **Decision:** `setFloor` refits by default; pan paths opt out. Rejected: refit
-  only on first load (UI floor-taps never reframed — the green-but-wrong review
-  catch).
+- **Decision:** user-facing floor switches **preserve the view** (`{fitToBounds:false}`
+  at the level-selector and connector-pin call sites). Rejected: refit on every
+  user switch (loses spatial context when stepping between levels — the original
+  forked-shell behavior). Earlier-rejected variant: refit only on first load
+  (UI floor-taps never reframed) — superseded; the engine still defaults to
+  refit-on-change, only the call sites opt out.
 - **Decision:** L1 is selectable and renders empty (browse/search work; only
   routing to/from it is a Phase-2 error). Rejected: hiding L1 from the selector.
 - **Invariant:** the selector lists all 5 levels ordered by `Level.position`;
   every floor — empty or sparse — activates without error.
+- **Invariant:** a user-initiated floor switch never refits — the active level
+  changes but zoom/pan/rotation are held. Only `!previousFloor` (initial load)
+  or an explicit `{fitToBounds:true}` triggers a refit.
 
 ## UX & accessibility
 
 - **Layout & hierarchy:** a vertical floor-button stack, highest floor on top,
   the active floor clearly marked, ordered by `Level.position`.
-- **Interaction:** one tap switches floors with a quick refit; the selection
-  state is obvious; L1 is selectable like any floor.
+- **Interaction:** one tap switches floors while **holding the current view**
+  (no refit jump) so the visitor keeps their bearings; the selection state is
+  obvious; L1 is selectable like any floor.
 - **Responsive:** comfortable tap targets on mobile/kiosk.
 - **Accessibility:** ARIA-labelled, keyboard-navigable buttons with a visible
   focus ring; the current floor is marked.
@@ -70,5 +82,9 @@ empty L1 and the sparse B2/B1.
 ## Tests
 
 - `test/core/FloorSwitching.test.js` — 5 codes in `position` order, `setFloor`
-  swaps geometry+labels + refit + `floor:changed` event, default-floor vs
-  priority on load, empty L1 + sparse B2/B1 activate and render without error.
+  swaps geometry+labels + `floor:changed` event, default-floor vs priority on
+  load, empty L1 + sparse B2/B1 activate and render without error. Refit policy:
+  a plain `setFloor` (no options) still refits (programmatic/initial-load
+  contract); a **connector-pin (floor-transition) tap preserves the view** (fires
+  the registered handler, switches the active level, **no** refit); an explicit
+  `{fitToBounds:false}` opts the level-selector / navigation / focus paths out.

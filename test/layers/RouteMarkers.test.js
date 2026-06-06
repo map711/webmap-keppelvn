@@ -362,10 +362,10 @@ describe('route-markers: start/end pins + floor-transition bubbles', () => {
       return layer;
     }
 
-    it('a hit on the departure bubble (anchored at fromX,fromY) returns the toLevelCode (F2)', () => {
+    it('a hit on the departure bubble (anchored at fromX,fromY) returns a floor-transition hit to F2', () => {
       const layer = renderDeparture();
       // The bubble is anchored at (200,201); a tap on the anchor is inside the bubble.
-      expect(layer.hitTest(200, 201)).toBe('F2');
+      expect(layer.hitTest(200, 201)).toEqual({ type: 'floor-transition', targetFloor: 'F2' });
     });
 
     it('a miss far from the bubble returns null', () => {
@@ -381,7 +381,7 @@ describe('route-markers: start/end pins + floor-transition bubbles', () => {
       layer.renderWithContext({ ctx: makeRecordingCtx(), invalidate() {} });
 
       // The arrival bubble is anchored at (300,301); tapping it switches back to F1.
-      expect(layer.hitTest(300, 301)).toBe('F1');
+      expect(layer.hitTest(300, 301)).toEqual({ type: 'floor-transition', targetFloor: 'F1' });
     });
   });
 

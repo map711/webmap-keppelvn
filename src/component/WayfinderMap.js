@@ -2129,7 +2129,10 @@ class WayfinderMapElement extends HTMLElement {
     if (!button || !this.#levelSelectorEl?.contains(button)) return;
     const floorCode = button.dataset.floor;
     if (floorCode) {
-      this.#engine.setFloor(floorCode);
+      // Tapping a level button keeps the current view (zoom/pan/rotation) so the
+      // user keeps spatial context across levels — { fitToBounds: false } opts out
+      // of the refit, matching the connector-pin and navigation/focus pan paths.
+      this.#engine.setFloor(floorCode, { fitToBounds: false });
     }
   }
 

@@ -302,8 +302,11 @@ export class PinMarkerLayer extends Layer {
     if (explicitNode?.level?.code === this.#currentLevelCode) {
       return explicitNode;
     }
-    // Last resort: any display node (legacy cross-floor focus-pin behaviour).
-    return location?.displayNodes?.[0] ?? null;
+    // Nothing resolves to the active floor -> draw nothing. The pin must never
+    // appear on a floor the shop/anchor doesn't occupy (the "pin shows on the
+    // wrong level after switching floors" bug). Cross-floor focus switches the
+    // floor FIRST, so by render time the active floor matches a display node.
+    return null;
   }
 
   #extractTransform(ctx) {
