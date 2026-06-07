@@ -45,6 +45,55 @@ export class TransformPipeline {
   }
 
   /**
+   * Set the lower scale bound, re-clamping the current scale.
+   * @param {number} min
+   */
+  setMinScale(min) {
+    this.#minScale = min;
+    this.#clampScale();
+  }
+
+  /**
+   * Set the upper scale bound, re-clamping the current scale.
+   * @param {number} max
+   */
+  setMaxScale(max) {
+    this.#maxScale = max;
+    this.#clampScale();
+  }
+
+  /**
+   * Derive the upper scale bound from a fit: `factor × the fit scale of the given
+   * bounds at the current canvas size`. Hand it the cross-floor envelope and the
+   * max-zoom factor to get one global zoom-in ceiling that re-resolves on resize.
+   * A degenerate (non-positive) fit scale leaves the bound untouched.
+   * @param {{width:number,height:number}} bounds
+   * @param {number} factor
+   * @param {number} [padding=0]
+   */
+  setMaxScaleFromFit(bounds, factor, padding = 0) {
+    const fit = this.computeFitScale(bounds, padding);
+    if (Number.isFinite(fit) && fit > 0) {
+      this.setMaxScale(fit * factor);
+    }
+  }
+
+  /**
+   * Scale at which `bounds` exactly fits the usable canvas (limiting axis).
+   * @param {{width:number,height:number}} bounds
+   * @param {number} [padding=0]
+   * @returns {number}
+   */
+  computeFitScale(bounds, padding = 0) {
+    const usableWidth = this.#canvasWidth - this.#padding.left - this.#padding.right - (padding * 2);
+    const usableHeight = this.#canvasHeight - this.#padding.top - this.#padding.bottom - (padding * 2);
+
+    const scaleX = usableWidth / (bounds.width || 1);
+    const scaleY = usableHeight / (bounds.height || 1);
+    return Math.min(scaleX, scaleY);
+  }
+
+  /**
    * Get current scale constraints.
    * @returns {{min:number,max:number}}
    */
@@ -196,12 +245,7 @@ export class TransformPipeline {
   fitToBounds(bounds, padding = 0) {
     this.#rotation = 0;
 
-    const usableWidth = this.#canvasWidth - this.#padding.left - this.#padding.right - (padding * 2);
-    const usableHeight = this.#canvasHeight - this.#padding.top - this.#padding.bottom - (padding * 2);
-
-    const scaleX = usableWidth / (bounds.width || 1);
-    const scaleY = usableHeight / (bounds.height || 1);
-    const fitScale = Math.min(scaleX, scaleY);
+    const fitScale = this.computeFitScale(bounds, padding);
 
     // Lower the minScale floor to the natural fit scale (capped at maxScale) so
     // this fit isn't re-clamped UP by a stale minScale left behind by a previous

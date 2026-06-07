@@ -14,9 +14,13 @@ const CONFIG_SCHEMA = {
   // mesh and the floor renders blank. Hosts whose data IS normalized can still
   // override via the `render-scale` attribute.
   renderScale: { type: 'number', default: 1, responsive: true },
-  maxZoom: { type: 'number', default: 2.5, responsive: true },
+  // Absolute world-scale override. Default null => the relative `maxZoomFactor`
+  // path wins: max zoom = factor × the largest floor's fit scale (one global
+  // ceiling). Hosts that want a fixed absolute cap set `max-zoom`.
+  maxZoom: { type: 'number', default: null, responsive: true },
+  maxZoomFactor: { type: 'number', default: 5, responsive: true },
   minZoom: { type: 'number|string', default: 'fit', responsive: true },
-  labelFontSize: { type: 'number', default: 5, responsive: true },
+  labelFontSize: { type: 'number', default: 10, responsive: true },
   labelMinFontSize: { type: 'number', default: 5, responsive: true },
   mapLabelFontFamily: { type: 'string', default: null },
   mapLabelFontColor: { type: 'string', default: null },

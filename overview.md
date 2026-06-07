@@ -32,6 +32,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `floor-rendering` `(ui)` | Unit-aware `FloorLayer`: per-unit polygons, `unit→layer→kind` style cascade, `getBounds()` fallback, `hitTest→unitId` | `capabilities/floor-rendering.md` |
 | `map-labels` `(ui)` | `LocationLayer` draws labelable-unit labels at `label_point`/`label_rotation`, zoom-responsive screen-space font (`max(minFontSize·dpr, fontSize·√scale·dpr)`) + cached overlap suppression with zoom-freeze/idle-recompute | `capabilities/map-labels.md` |
 | `floor-switching` `(ui)` | Level selector + `setFloor` swap geometry+labels and refit; `floor:changed` event; empty L1 + sparse B2/B1 | `capabilities/floor-switching.md` |
+| `zoom-bounds` | One global zoom-in ceiling = `maxZoomFactor × the largest floor's fit scale` (cross-floor envelope), re-derived on every refit; absolute `maxZoom` still overrides; animated focus clamps to live bounds | `capabilities/zoom-bounds.md` |
 | `destination-search` `(ui)` | Built-in search filters the catalog by title/tokens; results dropdown + info card | `capabilities/destination-search.md` |
 | `destination-focus` `(ui)` | `focusLocation` / polygon tap: switch floor + zoom + end pin; multi-tenant disambiguation; clear → browse | `capabilities/destination-focus.md` |
 | `navmesh-routing` | Triangle-A* + funnel string-pull over `navmesh_by_level`, cross-floor via `transitions`; per-floor polyline `segments` (no fake `Node[]`) | `capabilities/navmesh-routing.md` |
@@ -96,7 +97,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | Directory | Responsibility | Key entry point |
 |-----------|----------------|-----------------|
 | `src/data/` | Bundle load + index; destination catalog; geometry store; style cascade | `BundleLoader.js`, `LocationModel.js`, `MapGeometryModel.js`, `StyleResolver.js` |
-| `src/core/` | Engine orchestration (init/dispose/floor/focus), config, event bus | `MapEngine.js` |
+| `src/core/` | Engine orchestration (init/dispose/floor/focus), config, event bus, fit-derived zoom bounds | `MapEngine.js`, `zoomBounds.js` |
 | `src/layers/` | Canvas layers: floor polygons, labels, route polyline, pins, transition bubbles | `FloorLayer.js`, `LocationLayer.js`, `NavigationLayer.js`, `PinMarkerLayer.js`, `NavMarkerLayer.js` |
 | `src/renderer/` | Render loop, transform pipeline, layer stack, rbush overlap | `Renderer.js`, `RectVisibility.js` |
 | `src/interaction/` | Gesture recognition + hit-test classification | `HitTestManager.js` |
@@ -174,6 +175,7 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `triangleAStar` / `findNearestTriangle` | `src/navigation/TriangleAStar.js` | triangle-adjacency A* + point→triangle snap |
 | `funnelPath(triPath, mesh, start, end)` | `src/navigation/FunnelPath.js` | string-pull a triangle corridor → shortest `[x,y][]` |
 | `sortFloorCodesByPosition(codes, levels)` | `src/component/controls/levelOrder.js` | order floors by `Level.position` |
+| `computeEnvelope(boundsList)` | `src/core/zoomBounds.js` | cross-floor per-axis-max box (largest fitted view) for the relative max-zoom ceiling |
 
 ## Integration seams
 

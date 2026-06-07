@@ -15,6 +15,11 @@ import { PinMarkerLayer } from '../layers/PinMarkerLayer.js';
 import { NavMarkerLayer } from '../layers/NavMarkerLayer.js';
 import { GestureRecognizer } from '../interaction/GestureRecognizer.js';
 import { HitTestManager } from '../interaction/HitTestManager.js';
+import { computeEnvelope } from './zoomBounds.js';
+
+// Provisional max scale used before the data (and thus the cross-floor envelope)
+// is loaded; the first fit replaces it with the resolved global ceiling.
+const PROVISIONAL_MAX_SCALE = 8;
 
 /**
  * MapEngine is the central orchestrator for the wayfinder map.
@@ -53,6 +58,8 @@ export class MapEngine {
   #youAreHereNode = null;
   #configuredMinZoom;
   #configuredMaxZoom;
+  #configuredMaxZoomFactor;
+  #zoomEnvelope = null;
 
   #isZooming = false;
   #zoomDebounceId = null;
@@ -82,13 +89,15 @@ export class MapEngine {
     });
 
     this.#configuredMaxZoom = this.#config.get('maxZoom');
+    this.#configuredMaxZoomFactor = this.#config.get('maxZoomFactor');
     this.#configuredMinZoom = this.#config.get('minZoom');
 
-    if (typeof this.#configuredMinZoom === 'number') {
-      this.#renderer.transform.setScaleBounds(this.#configuredMinZoom, this.#configuredMaxZoom);
-    } else {
-      this.#renderer.transform.setScaleBounds(0.1, this.#configuredMaxZoom);
-    }
+    // Provisional bounds until the first fit resolves the real ceiling. An
+    // absolute `maxZoom` override (when set) wins; otherwise a placeholder that
+    // #restoreConfiguredScaleBounds replaces with `factor × largest-floor fit`.
+    const provisionalMin = (typeof this.#configuredMinZoom === 'number') ? this.#configuredMinZoom : 0.1;
+    const provisionalMax = (typeof this.#configuredMaxZoom === 'number') ? this.#configuredMaxZoom : PROVISIONAL_MAX_SCALE;
+    this.#renderer.transform.setScaleBounds(provisionalMin, provisionalMax);
   }
 
   /**
@@ -650,9 +659,14 @@ export class MapEngine {
 
     if (options.animate) {
       const current = transform.getViewState();
+      // Clamp the requested scale to the live bounds — the resolved max zoom is
+      // relative to the largest floor's fit, so a caller's preferred scale (e.g.
+      // search-focus's 3) must not animate past the global ceiling.
+      const { min, max } = transform.getScaleBounds();
+      const scale = Math.max(min, Math.min(max, options.scale ?? current.scale));
       const target = {
-        scale: options.scale ?? current.scale,
-        ...this.#computePanForCenter(worldX, worldY, options.scale ?? current.scale)
+        scale,
+        ...this.#computePanForCenter(worldX, worldY, scale)
       };
       this.#renderer.animateTo({
         ...target,
@@ -816,6 +830,9 @@ export class MapEngine {
     this.#hydrateStore(this.#mapGeometryStore, bundle, { renderScale });
 
     this.#floors = this.#mapGeometryStore.getFloorCodes();
+    this.#zoomEnvelope = computeEnvelope(
+      this.#floors.map((code) => this.#mapGeometryStore.getLevelByCode(code)?.getBounds?.())
+    );
 
     this.#eventBus.emit('data:loaded', {
       locationCount: this.#locationStore.locations.length,
@@ -1072,9 +1089,22 @@ export class MapEngine {
     );
   }
 
+  // Runs after every fitToBounds (which set min = the floor's fit scale). Restores
+  // the configured min (when numeric) and resolves the max: an absolute `maxZoom`
+  // override if set, else `factor × the largest floor's fit scale` — one global
+  // zoom-in ceiling, re-derived here so it tracks canvas resizes.
   #restoreConfiguredScaleBounds() {
-    if (typeof this.#configuredMinZoom !== 'number') return;
-    this.#renderer.transform.setScaleBounds(this.#configuredMinZoom, this.#configuredMaxZoom);
+    const transform = this.#renderer.transform;
+
+    if (typeof this.#configuredMinZoom === 'number') {
+      transform.setMinScale?.(this.#configuredMinZoom);
+    }
+
+    if (typeof this.#configuredMaxZoom === 'number') {
+      transform.setMaxScale?.(this.#configuredMaxZoom);
+    } else if (this.#zoomEnvelope) {
+      transform.setMaxScaleFromFit?.(this.#zoomEnvelope, this.#configuredMaxZoomFactor);
+    }
   }
 
   #markZoomActivity() {
