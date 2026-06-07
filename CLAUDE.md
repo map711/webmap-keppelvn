@@ -31,6 +31,15 @@ Project map + decisions live in `overview.md`; per-capability records in
   and connector-pin (floor-transition) tap — also pass `{fitToBounds:false}`** to
   hold zoom/pan/rotation across levels; only the initial load (or an explicit
   `{fitToBounds:true}`) reframes. A user floor-tap must NOT refit.
+- **Max zoom is RELATIVE, not absolute.** The default zoom-in ceiling is
+  `maxZoomFactor (5) × the largest floor's fit scale` — one global cap shared by
+  every floor, derived from the cross-floor `computeEnvelope` box and **re-resolved
+  after every fit** inside `#restoreConfiguredScaleBounds` (so it tracks resizes)
+  via `TransformPipeline.setMaxScaleFromFit`. A non-null `maxZoom` config is an
+  absolute override that wins. Animated focus **clamps the requested scale to the
+  live `getScaleBounds()`** so a caller's preferred scale can't overshoot the
+  ceiling. Don't reintroduce a fixed `maxZoom` default or compute the ceiling once
+  at load.
 - **Bundle counts are seed-sparse, and live ≠ fixture.** The live data is now the
   split `maps_`/`datas_` `.gz` mirror (pulled via `npm run data:pull`, gitignored —
   the committed `datas/SGC_v001.json` is gone); it places **6 shops across L2+L3**,
@@ -105,4 +114,7 @@ Project map + decisions live in `overview.md`; per-capability records in
   font — never `box.width/scale`. Visibility thinning is **cached on
   (scale, rotation)**; `beginZoom()` freezes it and `endZoom()` schedules an idle
   recompute (setTimeout fallback under fake timers) that calls the render
-  context's `invalidate`.
+  context's `invalidate`. **Labels draw UNDER the global `rotate(θ)`** — the
+  layer's own `ctx.rotate` is `nodeRot + flip` ONLY; re-adding the map rotation
+  `θ` double-rotates every label to `2θ` (it spins against its unit). The `flip`
+  is still keyed on the net `θ + nodeRot` screen orientation.
