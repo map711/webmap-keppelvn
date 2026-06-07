@@ -1,162 +1,141 @@
-# Plan — Label legibility & zoom-responsive sizing
-
-<!-- Single-cycle refinement of the shipped Phase-1 `map-labels` capability. NOT an
-epic phase — the epic marker stays on Phase 3 (Kiosk & share). At /tars:cleanup this
-folds into capabilities/map-labels.md (fix/amend, same slug). -->
+# Plan — Consume split remote data (`maps_` + `datas_`)
 
 ## What & why            (PM ↔ client)
 
-- **Intent:** Shop labels on the SGC map currently render **microscopic and
-  unreadable** — especially zoomed out — and the zoom range "feels off." Re-work
-  the `map-labels` capability so labels stay **constant-readable** at any zoom,
-  grow gently as you zoom in, and never depend on how small the unit polygon is —
-  matching the proven label behavior the shell already provides. Also fold in the
-  label **visibility-caching / idle-recompute**
-  machinery, because label density on SGC is expected to grow and per-frame
-  overlap thinning must stay cheap.
+- **Intent:** The CMS has stopped publishing one self-contained `SGC_v001.json`
+  bundle and now publishes **two** files to the dev bucket
+  (`https://keppelvn-data-dev.indoorcms.com/datas/`): `maps_SGC_v001.json.gz`
+  (geometry/navmesh, ~2.6 MB) and `datas_SGC_v001.json.gz` (shop directory + CMS
+  content, ~128 KB). This cycle makes the webmap consume those two remote files
+  instead of the single locally-bundled `datas/SGC_v001.json`, and adds a pull
+  script so local dev mirrors the latest published data. This **amends the
+  shipped `map-bootstrap` capability** — it is not a new Phase-3 capability.
 - **Constraints:**
-  - **Re-work in place.** Change only `src/layers/LocationLayer.js` internals (+
-    its tests + the doc note). Keep the layer's role and its place in the engine/
-    render loop. `labelFit.js` stays as a pure util (no longer in the render path);
-    `node.unitWidth/unitHeight` become unused by the layer but are not removed.
-  - **No engine/renderer wiring changes.** `MapEngine` already calls
-    `#locationLayer.beginZoom?.()` / `endZoom?.()` and `renderContext` already
-    carries `invalidate` + `dpr` — the hooks are just unimplemented today.
-  - **Behavior-changing** to `map-labels`: the documented `_fitScale`
-    shrink-to-fit promise is replaced by a min-size-floor promise. (User confirmed
-    via the fix-mode adherence gate → escalated here for planning rigor.)
-  - **Zoom mechanism is NOT restructured.** The fit/min/max clamp path is already
-    correct; `maxZoom: 2.5` stays the default. "Zoom feels off" is dominated
-    by unreadable labels; re-evaluate the single `maxZoom` value only at
-    verification time if zoom-in still feels short — it is not a gated criterion.
-  - Canvas-2D, raw CMS coords (`renderScale = 1`), Vitest node-env with the mocked
-    2D canvas shim, dev/run on port 5010. Public layer/engine API stays intact.
-  - **Out of scope:** wiring `labelFontSize` config→layer beyond the `#style`
-    block already in use; activating the suppressed-label *fade* in the render
-    loop (ported as latent capability); any change to focus/route
-    label behavior.
+  - `BundleModel` and everything downstream of it (stores, layers, router,
+    catalog) must stay **untouched** — only the load + merge front-end changes.
+  - Tests stay **offline** — fetch mocked, fixtures read from disk, no port
+    bound, no network (per the repo's testing invariants).
+  - The dev server stays the ownership-aware `.dev/` harness on :5010; nothing
+    may reintroduce a path that binds :5010 directly.
+  - Deploy must **not** delete the CMS-owned `datas/` objects in the bucket.
 - **Decisions:**
-  - **Adopt a screen-space, zoom-responsive font** — `fontSize =
-    base · √scale · dpr`, floored at `minFontSize · dpr`, drawn under the existing
-    `1/scale` counter-scale so the label is constant screen size and grows by
-    √scale. *Rejected:* keep the fixed world-space font and only raise the
-    constant (still scales 1:1 with zoom, still no floor — the actual bug).
-  - **Drop `_fitScale` from the render path** — label size is independent of unit
-    polygon extents. *Rejected:* a hybrid that keeps the unit-shrink (tiny units
-    still get tiny labels).
-  - **Adopt visibility caching + idle recompute + quantized text-metrics**
-    — recompute the visible/suppressed sets only on scale/rotation change; freeze
-    during a zoom gesture (`beginZoom`/`endZoom`) and re-thin on idle via
-    `invalidate`. *Rejected:* keep keppel's inline per-frame thinning (fine today,
-    but the user explicitly wants headroom for growing label counts).
-  - **Reuse the `map-labels` slug** so cleanup amends the existing record.
-    *Rejected:* a new slug (fragments one capability across two records).
+  - **Two explicit URLs** (`maps-url` + `datas-url` component attrs) — rejected:
+    base-URL+code+version derivation; reusing `data-url` as a base prefix.
+  - **Gzip (`.gz`)** transfer — `DataLoader` already decompresses via
+    `DecompressionStream`; rejected: plain JSON (2.6 MB uncompressed).
+  - **Replace `data-url`/`map-url` entirely** — one load path; rejected: keeping
+    single-bundle fallback (two code paths + precedence rule).
+  - **Local mirror via pull script + relative demo URLs** — same-origin locally
+    (dev serves the pulled copy) *and* deployed (bucket serves the CMS copy), so
+    **no CORS**; rejected: demos hardcode the absolute dev-bucket URL (CORS for
+    localhost; supersedes an earlier in-conversation choice).
+  - **Revises the epic's "single bundle, one `data-url`" cross-cutting
+    decision** (`tars-epic.md`) — the producer re-split along its natural
+    maps/datas seam, so the consumer follows. The two-store split
+    (`LocationStore` + `MapGeometryStore`) and string-namespaced ids are
+    unaffected.
+  - Source intent: `docs/superpowers/specs/2026-06-07-remote-split-data-design.md`.
 
 ## How                   (tech lead — grounded in the codebase)
 
-- **Module map:** all substantive change in `src/layers/LocationLayer.js`. Tests in
-  `test/layers/MapLabels.test.js`. Doc note in `CLAUDE.md`. The durable record
-  `capabilities/map-labels.md` is amended at cleanup (not now).
-- **Patterns:** implement the label mechanism in `src/layers/LocationLayer.js`
-  **adapted to keppel's data
-  model** — keep keppel's node accessors (`#labelableNodesOnLevel()` over
-  `store.locations[].displayNodes`, `node.labelable`, `node.levelCode`,
-  `node.text`).
-- **Integration seams:** none new. `renderWithContext(renderContext)` consumes the
-  already-passed `{ ctx, dpr, scale, rotation, invalidate }`. `beginZoom()` /
-  `endZoom()` implement the no-op hooks the engine already calls
-  (`MapEngine.js:1077`/`1098`).
-- **Reuse:** the shared `computeVisibleRects` (`src/renderer/RectVisibility.js`) for
-  overlap thinning; the existing `1/scale` counter-scale and
-  rotation-flip logic already in `#drawLabel`; `labelFit.js` stays importable but
-  unused by the layer.
-- **Cross-cutting tech-stack decisions:** none new — inherits the epic's Canvas-2D /
-  raw-coords / Vitest decisions. `--no-panel`: the design fork (full port vs
-  hybrid vs tune-only) was resolved during brainstorming; the `code-explorer`
-  diagnosis proved the root cause. A single grounded pass produced this *How*.
-
-<!-- Decision log: no panel (design pre-settled in the approved design doc
-docs/superpowers/specs/2026-06-06-label-sizing-and-zoom-design.md + code-explorer
-diagnosis). Sub-decisions: (a) reuse map-labels slug; (b) keep keppel data
-accessors, port only the mechanism; (c) zoom mechanism untouched, maxZoom tuned at
-verification only; (d) suppressed-fade ported latent, not activated. -->
+- **Module map:**
+  - `src/data/BundleLoader.js` — `load(url)` → `load({mapsUrl, datasUrl})`; two
+    parallel `DataLoader` fetches, per-half validation, merge, `new BundleModel`.
+    `BundleModel` + its index-building are **unchanged**.
+  - `src/core/Config.js` — replace `dataUrl`(required)/`mapUrl` schema keys with
+    `mapsUrl`(required) + `datasUrl`(required).
+  - `src/core/MapEngine.js` `#loadData` — read `mapsUrl`+`datasUrl`; call
+    `load({mapsUrl, datasUrl})`. Hydration path below it unchanged.
+  - `src/component/WayfinderMap.js` — `observedAttributes` drop `data-url`/
+    `map-url`, add `maps-url`/`datas-url`; both-required init gate + config build.
+  - `scripts/pull-data.js` (new) + `package.json` `data:pull` script.
+  - `scripts/deploy.js` — remove the `aws s3 sync "datas/" … --delete` step.
+  - `demo/*.html` (+ doc pages) — relative split URLs; `.gitignore` + remove the
+    committed `datas/SGC_v001.json`.
+- **Patterns:** Follow the existing `DataLoader` gzip/cache contract (no new HTTP
+  client in the browser path); follow the repo's **zero-dependency Node tooling**
+  style for the pull script (node builtins only, like `.dev/*.mjs`); keep
+  `BundleLoadError` as the structured failure type.
+- **Integration seams:** The only behavioral seam that moves is
+  `BundleLoader.load`'s signature and the component's data attributes. The merge
+  produces a byte-shape-identical object to today's single bundle, so
+  `BundleModel` is the firewall — nothing downstream observes the split.
+- **Reuse:** `DataLoader` (parallel, cached, gzip-aware) for both fetches;
+  `BundleModel` + `BundleLoadError` verbatim; the merged on-disk
+  `test/fixtures/SGC_v001.json` sliced into `{maps, datas}` by a test helper
+  (no new 2 MB fixtures committed).
+- **Cross-cutting tech-stack decisions:** None new — this *revises* one existing
+  epic decision (single→split bundle). No design panel (one-seam slice, design
+  pre-resolved in the approved spec; `--no-panel` by YAGNI).
 
 ## Capability breakdown
 
-- [x] `map-labels` `(ui)` — re-work LocationLayer label sizing: zoom-responsive
-  screen-space font (`base·√scale·dpr` floored at `minFontSize·dpr`), drop the
-  `_fitScale` unit-shrink, fix the `#screenRect` thinning-rect `/scale` mismatch,
-  and add visibility caching / idle-recompute / quantized-text-metrics +
-  `beginZoom`/`endZoom`. · depends on: Phase-1 `destination-catalog`,
-  `floor-rendering` (shipped); re-works shipped Phase-1 `map-labels`
+- [x] `split-data-loading` — webmap loads two remote URLs (`maps-url` +
+  `datas-url`), validates each half, merges into the unchanged `BundleModel`;
+  `data-url`/`map-url` removed across loader, config, component, engine, demos &
+  deploy · depends on: none
+- [x] `data-pull-script` — `npm run data:pull` downloads the latest split `.gz`
+  files into `datas/` (zero-dep, env-overridable base/mall/version) · depends on: none
 
 ## How to test           (the binding acceptance criteria)
 
-<!-- All criteria are node-env Vitest, driven through the existing mocked 2D canvas
-shim in test/layers/MapLabels.test.js. The font a label is drawn at is observable
-via the `ctx.font` string set in #applyFont; the overlap-thinning rects via the
-layer's screen-rect path / `visibleLabels`. measureText in the shim is deterministic
-(width ∝ char count), so font px and box widths are assertable. -->
+### `split-data-loading`
 
-### `map-labels` `(ui)`
-- **Min-size floor (the core fix):** rendering at a small zoom (`scale = 0.05`,
-  `dpr = 1`, `minFontSize = 8`) applies a font whose px size is **≥ 8** — never the
-  pre-fix microscopic value. Assert `parseFloat(ctx.font) >= minFontSize * dpr`.
-  (FAILS today: the fixed `style.fontSize` path emits the same small px at every
-  scale with no floor.)
-- **√scale growth above the floor:** with `fontSize = 8`, `minFontSize = 8`, the
-  font at `scale = 4` is **strictly greater** than at `scale = 1`
-  (`8·√4 = 16 > 8·√1 = 8`), and at `scale = 0.25` it equals the floor (`8`). Assert
-  the ordering `font(0.25) == 8 < font(4)` and `font(4) > font(1)`. (FAILS today:
-  font is constant across scales.)
-- **dpr scales the floor and the size:** at the same small `scale = 0.25`,
-  `font(dpr = 2) == 2 × font(dpr = 1)` (the floor is `minFontSize · dpr`). Assert
-  the px doubles with dpr.
-- **Independent of unit polygon size:** two labelable nodes with **identical text
-  and identical scale/dpr** but very different `unitWidth/unitHeight` (e.g. 20×12 vs
-  2000×2000) are drawn at the **same** font px — the `_fitScale` unit-shrink is
-  gone. Assert the two emitted font sizes are equal. (FAILS today: the small unit's
-  label is shrunk by `_fitScale`.)
-- **Thinning rect matches the drawn footprint:** the overlap-suppression screen-rect
-  for a label has width equal to its measured screen-space box (`box.width`, ±
-  padding) at the active scale — **not** `box.width / scale` and **not** multiplied
-  by a `fit` < 1. Assert the rect width ≈ the measured box width at `scale = 0.1`
-  (i.e. it does **not** scale by `1/scale`). (FAILS today: `#screenRect` returns
-  `(box.width · fit) / safeScale`.)
-- **Visibility recompute is cached on unchanged scale/rotation:** two consecutive
-  `renderWithContext` calls with the **same** `scale` and `rotation` run the overlap
-  thinning **once** (second render is a cache hit); a third call with a **changed**
-  `scale` recomputes. Assert via a spy/counter on the thinning computation (or an
-  observable recompute count) that it is `1` after the repeat and `2` after the
-  change.
-- **Zoom gesture freezes then idle-recomputes:** after `beginZoom()` the visibility
-  set is marked dirty and is **not** recomputed mid-gesture; after `endZoom()` an
-  idle recompute is scheduled (via `setTimeout` fallback under fake timers) that,
-  when it fires, calls the `invalidate` captured from `renderContext`. Assert
-  `invalidate` is called exactly once after advancing timers post-`endZoom`, and not
-  before.
-- **Labelable gate unchanged (regression guard):** the existing selection still
-  holds — a vacant `shop`-kind unit (no tenancy) and an `escalator` unit emit **no**
-  label; a tenanted shop unit emits its tenancy name. (Guards that the port didn't
-  break node selection.)
+- `BundleLoader.load({mapsUrl, datasUrl})` with two mocked fetches (keyed by URL,
+  bodies sliced from the on-disk fixture via a `splitFixture()` helper returning
+  `{maps, datas}`) resolves a `BundleModel` whose **merged counts equal today's**:
+  5 levels, 10 kinds, 158 units, 20 shops, 10 categories, 2 transitions, and
+  `navmesh_by_level` carrying its level keys.
+- The merge sources geometry + `mall` from the **maps** half and `shops` +
+  `categories` from the **datas** half: the resolved model's `mall` equals the
+  maps input's `mall`, and `shopsById`/`categoriesById` resolve an id that exists
+  only in the datas input.
+- Extra `datas_` keys present on the datas input but unused by the webmap
+  (e.g. `banners`, `events`, `malls`) are **ignored** — they do not appear as
+  `BundleModel` fields and do not trigger a validation error.
+- A required geometry key (e.g. `navmesh_by_level`) missing from the **maps**
+  half rejects with a `BundleLoadError` whose message **names the maps URL**; a
+  required key (`shops` or `categories`) missing from the **datas** half rejects
+  with a `BundleLoadError` whose message **names the datas URL**.
+- `new Config({mapsUrl, datasUrl})` validates; omitting `mapsUrl` **or**
+  `datasUrl` throws `Config: "mapsUrl"/"datasUrl" is required`; `dataUrl`/`mapUrl`
+  are no longer schema keys (a config of only `{dataUrl}` throws for missing
+  `mapsUrl`).
+- `MapEngine` init (real `BundleLoader`, mocked `globalThis.fetch`, store mocks)
+  fetches **both** `mapsUrl` and `datasUrl` and emits `data:loaded` with
+  `floorCount === 5`; neither a `data-url` nor a `map-url` is fetched.
+- `WayfinderMap.observedAttributes` includes `maps-url` and `datas-url` and
+  excludes `data-url`/`map-url`; calling `init()` with only one of the two
+  present rejects/throws
+  `wayfinder-map: maps-url and datas-url attributes are required`.
+- Every `demo/*.html` that renders a `<wayfinder-map>` carries
+  `maps-url="../datas/maps_SGC_v001.json.gz"` +
+  `datas-url="../datas/datas_SGC_v001.json.gz"` and **no** `data-url`/`map-url`
+  attribute remains in `demo/`.
+- `scripts/deploy.js` syncs the local `datas/` mirror **without `--delete`** (the
+  CMS owns those bucket objects — never delete them) — the deploy bucket is a
+  separate origin from the CMS dev bucket and the demos load `../datas/…gz`
+  same-origin from it, so deploy must publish the mirror (an empty mirror aborts);
+  `.gitignore` ignores `datas/*.gz` and the tracked `datas/SGC_v001.json` is
+  removed from the repo. *(Revised from the original "no `s3 sync` of `datas/`"
+  criterion — that 403'd every deployed demo; the real constraint is no-`--delete`.)*
+- (QA-verified, code-qa) Against the running `.dev/` harness on :5010, a GET of
+  `/datas/maps_SGC_v001.json.gz` returns 200 with the file bytes — confirming dev
+  serves the local mirror with no docroot restriction.
 
-## Design intent         (UI-facing `(ui)` capabilities only — guidance, not a gate)
+### `data-pull-script`
 
-### `map-labels`
-- **Layout & hierarchy:** shop names sit centered on their unit at the pre-resolved
-  `label_point`/`label_rotation`, drawn at a **constant, legible screen size** (the
-  `1/scale` counter-scale undoes world zoom) over a light translucent halo for
-  contrast against floor fills. The floor geometry stays the hero; labels read
-  cleanly without dominating. Empty state = no labelable units (nothing drawn);
-  there is no loading/error state for labels.
-- **Interaction:** labels track their unit during pan/zoom and grow gently (√scale)
-  as you zoom in — never ballooning, never collapsing to nothing. During an active
-  zoom gesture the visible set holds steady (no flicker); it re-thins once motion
-  settles. Overlapping labels thin out, the shorter/higher-priority one surviving.
-- **Responsive:** crisp at DPR>1 (font and floor both scale by dpr); the
-  `minFontSize · dpr` floor keeps labels readable on mobile and at the fit zoom.
-- **Accessibility:** the canvas is decorative — label text mirrors the searchable
-  `title`, which is the accessible path to every destination.
-- **Implementation:** add `#computeFontSize`, `#computeLabelVisibility`,
-  `#scheduleIdleRecompute`, `#measureText`/`#quantizeFontSize`, `#renderLabel` to
-  `LocationLayer.js`; reuse keppel's existing `computeVisibleRects` and counter-scale.
+- `scripts/pull-data.js` exports an injectable `pullData({baseUrl, mall, version,
+  outDir, fetch})`; called with a stub fetcher returning known bytes, it writes
+  **both** `maps_SGC_v001.json.gz` and `datas_SGC_v001.json.gz` into `outDir`
+  with exactly the fetched bytes.
+- The derived download URLs are
+  `${baseUrl}/maps_${mall}_${version}.json.gz` and
+  `${baseUrl}/datas_${mall}_${version}.json.gz`; defaults are
+  `baseUrl=https://keppelvn-data-dev.indoorcms.com/datas`, `mall=SGC`,
+  `version=v001`, each overridable via env (`DATA_BASE_URL`, `MALL`, `VERSION`).
+- A non-2xx response for either file **rejects** with an error naming the failed
+  URL/status and does **not** leave a partial/garbage output file for that target.
+- The script imports only Node builtins (`node:*`) — no new `package.json`
+  dependency is added; `package.json` `scripts` includes
+  `"data:pull": "node scripts/pull-data.js"`.
