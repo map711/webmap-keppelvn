@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "rollup -c && node scripts/build.js",
+    "data:pull": "node scripts/pull-data.js",
     "dev": "node .dev/server.mjs",
     "dev:ensure": "node .dev/ensure.mjs",
     "dev:stop": "node .dev/stop.mjs",
