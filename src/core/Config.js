@@ -1,9 +1,9 @@
 const CONFIG_SCHEMA = {
-  // Data source: the single self-contained webmap bundle URL (required).
-  dataUrl: { type: 'string', required: true },
-  // Legacy geometry URL — no longer fetched (the bundle is self-contained).
-  // Accepted for backward-compatible config but optional and unused.
-  mapUrl: { type: 'string', required: false },
+  // Data source: the CMS publishes the consumer bundle SPLIT into two remote
+  // halves — `maps_…` (geometry + mall) and `datas_…` (shop directory). Both
+  // URLs are required; the loader fetches them in parallel and merges.
+  mapsUrl: { type: 'string', required: true },
+  datasUrl: { type: 'string', required: true },
 
   // Rendering
   // The bundle authors all geometry — unit polygons, navmesh, label points — in

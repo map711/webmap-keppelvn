@@ -2,7 +2,7 @@
 
 ## Intent
 
-A standalone, browser-first indoor wayfinding map for **Saigon Centre (SGC)** — a Keppel mall — shipped as a `<wayfinder-map>` Web Component. It reuses a product *shell* (a polished Canvas-2D component + UI + build/deploy), but replaces its data/render/routing *guts* with logic ported from the `indoorcms-keppelvn` CMS (`static/map/` renderer + `static/routing/` navmesh wayfinding), because the engine must consume the CMS's published bundle `datas/SGC_v001.json` — GeoJSON-polygon units in raw coordinates + a navmesh triangulation + cross-floor transitions — which a node-graph engine cannot. The CMS is the *producer* of the bundle; this webmap is the *consumer*. The two meet only at `SGC_v001.json`.
+A standalone, browser-first indoor wayfinding map for **Saigon Centre (SGC)** — a Keppel mall — shipped as a `<wayfinder-map>` Web Component. It reuses a product *shell* (a polished Canvas-2D component + UI + build/deploy), but replaces its data/render/routing *guts* with logic ported from the `indoorcms-keppelvn` CMS (`static/map/` renderer + `static/routing/` navmesh wayfinding), because the engine must consume the CMS's published data — GeoJSON-polygon units in raw coordinates + a navmesh triangulation + cross-floor transitions — which a node-graph engine cannot. The CMS now publishes that data **split into two gzipped halves** (`maps_…` geometry + `datas_…` shop directory) which the webmap fetches in parallel and merges. The CMS is the *producer*; this webmap is the *consumer*; the two meet only at that split bundle.
 
 ## Cross-cutting decisions
 
@@ -10,7 +10,7 @@ Resolved once here (via the epic-scope design panel: reuse-first spine + clean-s
 
 - **Renderer strategy** — keep the **Canvas-2D** renderer + component shell; port the indoorcms *logic* (style cascade, label placement, navmesh routing) into the existing layer/store classes by replacing their internals **in place**. Rejected: swap to **Konva** (re-plumbs the proven gesture/marker/animation shell); add parallel `Navmesh*Layer` files (dead-code clutter in a greenfield fork).
 - **Engine** — keep `src/core/MapEngine.js`; rebuild only its `#loadData` / `#createLayers` / `#createNavigationSystem` internals. Rejected: a new `WayfinderEngine.js` (rewrites ~600 lines of proven dispose/resize/zoom-debounce/animateTo orchestration).
-- **Data contract** — **single bundle**, one `data-url` → `SGC_v001.json` (retire `map-url`). Preserve the two-store split (`LocationStore` + `MapGeometryStore`) as the public seam; rebuild their internals from the bundle. Rejected: unify into one store (touches every layer/engine read site); keep `map-url` (there is no second file).
+- **Data contract** — **split remote bundle** (revised post-Phase-2): the CMS publishes two gzipped halves — `maps_…` (geometry/navmesh/`mall`) + `datas_…` (shop directory) — consumed via two required URLs (`maps-url` + `datas-url`), fetched in parallel and **merged behind the `BundleModel` firewall** so everything downstream is byte-shape-identical to the old single bundle. *Supersedes the original "single bundle, one `data-url`" decision* (the producer re-split its publish along its natural maps/datas seam; the consumer followed). Preserve the two-store split (`LocationStore` + `MapGeometryStore`) as the public seam; rebuild their internals from the merged model. Rejected: unify into one store (touches every layer/engine read site); a single-bundle fallback path alongside the split; base+code+version URL derivation.
 - **Destination identity** — **string-namespaced ids**: one `Location` per tenanted shop = `shop:<shop_id>` (a multi-unit shop carries all `unitIds[]` + spanned `levelCodes[]`); one `Location` per routable non-connector facility unit = `unit:<unit_id>`. Connectors (escalator/elevator/stairs) are **never** Locations — they are traversed, not targeted. `focus` / `you-are-here` re-key from node-id → these ids. Rejected: numeric ids with a `+1_000_000` facility offset (fragile, silent collisions).
 - **Route result shape** — replace `PathResult.path: Node[]` with **per-floor polyline segments** `segments: Map<levelCode, [x,y][]>` + `transitions: RouteTransition[]` + `startAnchor`/`endAnchor`. Rejected: synthesize fake `Node[]` from polyline points (a lie that breaks any `node.peers`/`node.id` consumer and the cross-floor split).
 - **Coordinate space** — keep **raw CMS units** throughout; `renderScale = 1` (identity). A level's `width`/`height` come from `navmesh_by_level[level].envelope_dims`, with a **unit-polygon bbox union** fallback for meshless levels (L1). Rejected: normalize to 0–1 × renderScale (FP drift, ambiguous for L1, forces coordination across store/router/labels).
@@ -29,7 +29,7 @@ Resolved once here (via the epic-scope design panel: reuse-first spine + clean-s
 ## Dependency tree
 
 ```
-map-bootstrap                         (fork shell + single-bundle load + index + engine init + run@5010)
+map-bootstrap                         (fork shell + split maps/datas load+merge + index + engine init + run@5010)
 ├── destination-catalog               (shops+facilities → Location catalog)
 │   └── destination-search (ui)       (depends on map-labels too)
 ├── floor-rendering (ui)              (per-unit polygons + style cascade + hit-test)
@@ -53,4 +53,4 @@ map-bootstrap                         (fork shell + single-bundle load + index +
 
 ## Current phase
 
-**Kiosk & share** (Phase 3) — Phase 1 *Browse the map* (7/7 green) and Phase 2 *Wayfinding* (6/6 green, 0 blocked) shipped and are now in git history. A live-browser smoke pass is owed for Phase 2's three `(ui)` capabilities (`/tars:review --ui`). The next `/tars:plan` targets Phase 3.
+**Kiosk & share** (Phase 3) — Phase 1 *Browse the map* (7/7 green) and Phase 2 *Wayfinding* (6/6 green, 0 blocked) shipped and are now in git history. An **out-of-phase amendment cycle** then landed between phases (not a Phase-3 capability): `split-data-loading` re-pointed `map-bootstrap` at the CMS's split publish (see the revised Data-contract decision) and added the `data-pull-script` tooling. A live-browser smoke pass is still owed for Phase 2's three `(ui)` capabilities (`/tars:review --ui`). The next `/tars:plan` targets Phase 3.

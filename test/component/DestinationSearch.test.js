@@ -429,7 +429,8 @@ async function mountSearch(store) {
   const WayfinderMapElement = mod.WayfinderMapElement;
 
   const el = new WayfinderMapElement();
-  el.setAttribute('data-url', '/bundle.json');
+  el.setAttribute('maps-url', '/maps_bundle.json.gz');
+  el.setAttribute('datas-url', '/datas_bundle.json.gz');
   el.setAttribute('search-control', '');
 
   // Inject the stub engine + mark initialized via the real init seam: replace the

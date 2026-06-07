@@ -54,8 +54,8 @@ const DEFAULT_MARKER_CONNECTOR_BG = 'rgba(109, 151, 254, 0.93)';
 class WayfinderMapElement extends HTMLElement {
   static get observedAttributes() {
     return [
-      'data-url',
-      'map-url',
+      'maps-url',
+      'datas-url',
       'default-floor',
       'you-are-here-node-id',
       'focus-node-id',
@@ -222,7 +222,7 @@ class WayfinderMapElement extends HTMLElement {
     this.#applyControlThemeFromAttributes();
     this.#syncIconsFromAttributes();
     this.#setupViewportInsetTracking();
-    if (this.hasAttribute('data-url')) {
+    if (this.hasAttribute('maps-url') && this.hasAttribute('datas-url')) {
       this.#scheduleInit();
     }
   }
@@ -235,11 +235,11 @@ class WayfinderMapElement extends HTMLElement {
     if (oldValue === newValue) return;
 
     switch (name) {
-      case 'data-url':
-      case 'map-url':
+      case 'maps-url':
+      case 'datas-url':
         if (this.#initialized) {
           this.#reinitialize();
-        } else if (this.hasAttribute('data-url')) {
+        } else if (this.hasAttribute('maps-url') && this.hasAttribute('datas-url')) {
           this.#scheduleInit();
         }
         break;
@@ -371,8 +371,8 @@ class WayfinderMapElement extends HTMLElement {
       this.#setupResizeObserver();
       const config = this.#buildConfig();
 
-      if (!config.dataUrl) {
-        throw new Error('wayfinder-map: data-url attribute is required');
+      if (!config.mapsUrl || !config.datasUrl) {
+        throw new Error('wayfinder-map: maps-url and datas-url attributes are required');
       }
 
       this.#engine = new MapEngine(this.#canvas, config);
@@ -964,8 +964,8 @@ class WayfinderMapElement extends HTMLElement {
 
   #buildConfig() {
     const config = {
-      dataUrl: this.getAttribute('data-url'),
-      mapUrl: this.getAttribute('map-url')
+      mapsUrl: this.getAttribute('maps-url'),
+      datasUrl: this.getAttribute('datas-url')
     };
 
     const defaultFloor = this.getAttribute('default-floor');

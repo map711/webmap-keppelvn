@@ -181,7 +181,8 @@ async function createInitializedEngine(config = {}) {
   const MapEngine = await importMapEngine();
   globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(loadSgc()));
   const engine = new MapEngine(new globalThis.HTMLCanvasElement(), {
-    dataUrl: '/datas/SGC_v001.json',
+    mapsUrl: '/datas/maps_SGC_v001.json.gz',
+    datasUrl: '/datas/datas_SGC_v001.json.gz',
     renderScale: 1,
     ...config
   });

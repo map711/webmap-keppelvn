@@ -462,7 +462,8 @@ async function mountWiredComponent() {
   expect(mod.WayfinderMapElement, 'WayfinderMap.js must export WayfinderMapElement').toBeTypeOf('function');
 
   const el = new mod.WayfinderMapElement();
-  el.setAttribute('data-url', '/bundle.json');
+  el.setAttribute('maps-url', '/maps_bundle.json.gz');
+  el.setAttribute('datas-url', '/datas_bundle.json.gz');
   // The real init() builds the (mocked) engine, then runs the REAL #wireEvents
   // that installs the engine->DOM forwarding this criterion pins.
   await el.init();
@@ -477,7 +478,8 @@ async function createInitializedEngine(bundleObj, config = {}) {
   const MapEngine = await importMapEngine();
   globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(bundleObj));
   const engine = new MapEngine(new globalThis.HTMLCanvasElement(), {
-    dataUrl: '/datas/bundle.json',
+    mapsUrl: '/datas/maps_bundle.json.gz',
+    datasUrl: '/datas/datas_bundle.json.gz',
     renderScale: 1,
     ...config
   });
@@ -888,7 +890,8 @@ describe('destination-focus: tap/select a shop -> focus it (real stores + classi
       globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(loadSgc()));
       // NOTE: NO renderScale here -> exercises the production Config default.
       const engine = new MapEngine(new globalThis.HTMLCanvasElement(), {
-        dataUrl: '/datas/bundle.json'
+        mapsUrl: '/datas/maps_bundle.json.gz',
+        datasUrl: '/datas/datas_bundle.json.gz'
       });
       await engine.init();
 

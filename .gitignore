@@ -4,6 +4,10 @@ node_modules/
 # Build output (reproducible via `npm run build`)
 dist/
 
+# CMS-owned map data: the split `maps_…`/`datas_…` halves are published by the
+# CMS and mirrored locally via `npm run data:pull` — never committed.
+datas/*.gz
+
 # QA verification scratch (browser screenshots from /tars:run)
 .qa-*.png
 

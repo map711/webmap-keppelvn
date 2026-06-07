@@ -174,9 +174,6 @@ async function importMapEngine() {
   return mod.MapEngine;
 }
 
-const SGC_DATA_URL = '/datas/SGC_v001.json';
-const UNUSED_MAP_URL = '/should-never-be-fetched/map.json';
-
 function jsonResponse(obj, { status = 200, contentType = 'application/json' } = {}) {
   return {
     ok: status >= 200 && status < 300,
@@ -187,7 +184,53 @@ function jsonResponse(obj, { status = 200, contentType = 'application/json' } = 
   };
 }
 
-describe('map-bootstrap: MapEngine single-bundle init', () => {
+// NOTE: The legacy `map-bootstrap: MapEngine single-bundle init` block (single
+// `data-url` fetch, `map-url` never fetched) was RETIRED by the
+// `split-data-loading` amendment, which replaces the single `data-url` path
+// entirely with the two-URL `{mapsUrl, datasUrl}` load (plan: "Replace
+// data-url/map-url entirely — one load path"). Its behaviours are re-covered
+// against the split path by the block below: floor-count on success ('emits
+// data:loaded with floorCount === 5 …'), and engine:error + no data:loaded on a
+// structurally-broken half ('emits engine:error and no data:loaded when a
+// fetched half is structurally broken').
+
+// >>> TARS cap:split-data-loading
+//
+// split-data-loading (engine half) — `MapEngine` init now reads `mapsUrl` +
+// `datasUrl` and threads them into the REAL BundleLoader's two-fetch
+// `load({mapsUrl, datasUrl})`. Init must fetch BOTH urls (keyed mock), merge into
+// the unchanged store-hydration path, and emit `data:loaded` with floorCount===5;
+// NEITHER a legacy `data-url` NOR a `map-url` is fetched.
+//
+// The render/interaction/store collaborators reuse the module mocks installed in
+// the map-bootstrap block above (this file is one module graph); only the URL
+// wiring + keyed fetch differ. BundleLoader + globalThis.fetch stay REAL, so the
+// two-fetch + floor-count facts are genuinely observed.
+//
+// Target: criterion 6.
+
+const SPLIT_MAPS_URL = '/datas/maps_SGC_v001.json.gz';
+const SPLIT_DATAS_URL = '/datas/datas_SGC_v001.json.gz';
+const LEGACY_DATA_URL = '/datas/SGC_v001.json';
+const LEGACY_MAP_URL = '/should-never-be-fetched/map.json';
+
+// Slice the merged fixture into the two halves the CMS publishes (maps: geometry
+// + mall; datas: shop directory), so the engine must fetch + merge both.
+function splitSgc(merged = loadSgc()) {
+  const maps = {
+    mall: merged.mall,
+    levels: merged.levels,
+    layers: merged.layers,
+    kinds: merged.kinds,
+    units: merged.units,
+    navmesh_by_level: merged.navmesh_by_level,
+    transitions: merged.transitions
+  };
+  const datas = { shops: merged.shops, categories: merged.categories };
+  return { maps, datas };
+}
+
+describe('split-data-loading: MapEngine two-URL init', () => {
   beforeEach(() => {
     globalThis.HTMLCanvasElement = class HTMLCanvasElement {};
     mockState.loadedBundle = null;
@@ -198,38 +241,47 @@ describe('map-bootstrap: MapEngine single-bundle init', () => {
     vi.restoreAllMocks();
   });
 
-  async function createEngine(extra = {}) {
+  async function createSplitEngine(extra = {}) {
     const MapEngine = await importMapEngine();
     return new MapEngine(new globalThis.HTMLCanvasElement(), {
-      dataUrl: SGC_DATA_URL,
-      mapUrl: UNUSED_MAP_URL,
+      mapsUrl: SPLIT_MAPS_URL,
+      datasUrl: SPLIT_DATAS_URL,
       ...extra
     });
   }
 
-  it('fetches exactly the data-url and NEVER the map-url during init', async () => {
+  function installSplitFetch() {
+    const { maps, datas } = splitSgc();
     globalThis.fetch = vi.fn().mockImplementation((url) => {
-      if (url === SGC_DATA_URL || (typeof url === 'string' && url.endsWith('SGC_v001.json'))) {
-        return Promise.resolve(jsonResponse(loadSgc()));
-      }
-      // Any other URL (notably the map-url) must never be requested.
+      if (url === SPLIT_MAPS_URL) return Promise.resolve(jsonResponse(maps));
+      if (url === SPLIT_DATAS_URL) return Promise.resolve(jsonResponse(datas));
       return Promise.reject(new Error(`unexpected fetch of ${url}`));
     });
+  }
 
-    const engine = await createEngine();
+  it('fetches BOTH the maps-url and datas-url during init', async () => {
+    installSplitFetch();
+    const engine = await createSplitEngine();
     await engine.init();
 
-    const fetchedUrls = globalThis.fetch.mock.calls.map((c) => c[0]);
-    expect(fetchedUrls).toContain(SGC_DATA_URL);
-    expect(fetchedUrls).not.toContain(UNUSED_MAP_URL);
-    // Exactly one bundle fetch (the single-URL contract).
-    expect(fetchedUrls.filter((u) => u === SGC_DATA_URL)).toHaveLength(1);
+    const fetched = globalThis.fetch.mock.calls.map((c) => c[0]);
+    expect(fetched).toContain(SPLIT_MAPS_URL);
+    expect(fetched).toContain(SPLIT_DATAS_URL);
   });
 
-  it('emits data:loaded with floorCount === 5 on the SGC bundle', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(loadSgc()));
+  it('fetches NEITHER a legacy data-url NOR a map-url', async () => {
+    installSplitFetch();
+    const engine = await createSplitEngine();
+    await engine.init();
 
-    const engine = await createEngine();
+    const fetched = globalThis.fetch.mock.calls.map((c) => c[0]);
+    expect(fetched).not.toContain(LEGACY_DATA_URL);
+    expect(fetched).not.toContain(LEGACY_MAP_URL);
+  });
+
+  it('emits data:loaded with floorCount === 5 from the merged split halves', async () => {
+    installSplitFetch();
+    const engine = await createSplitEngine();
     const payloads = [];
     engine.on('data:loaded', (detail) => payloads.push(detail));
 
@@ -239,37 +291,23 @@ describe('map-bootstrap: MapEngine single-bundle init', () => {
     expect(payloads[0].floorCount).toBe(5);
   });
 
-  it('emits engine:error (no unhandled throw escaping a different way) on a bundle missing a required key', async () => {
-    const broken = loadSgc();
-    delete broken.units;
-    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(broken));
-
-    const engine = await createEngine();
+  it('emits engine:error and no data:loaded when a fetched half is structurally broken', async () => {
+    const { maps, datas } = splitSgc();
+    delete maps.navmesh_by_level; // break the maps half
+    globalThis.fetch = vi.fn().mockImplementation((url) => {
+      if (url === SPLIT_MAPS_URL) return Promise.resolve(jsonResponse(maps));
+      if (url === SPLIT_DATAS_URL) return Promise.resolve(jsonResponse(datas));
+      return Promise.reject(new Error(`unexpected fetch of ${url}`));
+    });
+    const engine = await createSplitEngine();
     const errors = [];
-    engine.on('engine:error', (detail) => errors.push(detail));
-
-    // init may reject (it re-throws after emitting) — the contract is that the
-    // failure is SIGNALLED via the error event, not swallowed and not surfaced
-    // only as a foreign unhandled throw.
-    await engine.init().catch(() => {});
-
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toBeTruthy();
-    expect(errors[0].error).toBeInstanceOf(Error);
-  });
-
-  it('does not emit data:loaded when the bundle is structurally invalid', async () => {
-    const broken = loadSgc();
-    delete broken.navmesh_by_level;
-    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(broken));
-
-    const engine = await createEngine();
     const loaded = [];
-    engine.on('data:loaded', (detail) => loaded.push(detail));
-
+    engine.on('engine:error', (d) => errors.push(d));
+    engine.on('data:loaded', (d) => loaded.push(d));
     await engine.init().catch(() => {});
-
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toBeInstanceOf(Error);
     expect(loaded).toHaveLength(0);
   });
 });
-// <<< TARS cap:map-bootstrap
+// <<< TARS cap:split-data-loading

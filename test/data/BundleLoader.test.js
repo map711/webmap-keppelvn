@@ -329,3 +329,187 @@ describe('map-bootstrap: BundleLoader indexed model', () => {
   });
 });
 // <<< TARS cap:map-bootstrap
+
+// >>> TARS cap:split-data-loading
+//
+// split-data-loading (loader half) — `BundleLoader.load({mapsUrl, datasUrl})`
+// fetches the two remote halves IN PARALLEL (the CMS now publishes `maps_…`
+// geometry + `datas_…` directory separately), validates each half against the
+// keys that half is supposed to carry, and MERGES them into the unchanged
+// `BundleModel`. The merge produces a shape byte-identical to today's single
+// bundle, so the resolved model's counts must equal today's.
+//
+// The on-disk merged SGC fixture is SLICED into {maps, datas} by `splitFixture()`
+// here (no new 2 MB fixtures committed); the fetch is keyed by URL so the loader
+// must request BOTH urls and merge — a loader that only read one half fails the
+// count/identity assertions.
+//
+// Targets (one per acceptance criterion):
+//   1. load({mapsUrl,datasUrl}) -> merged model with today's exact counts.
+//   2. merge sources geometry+mall from MAPS, shops+categories from DATAS.
+//   3. extra datas_ keys (banners/events/malls) are IGNORED, not validated/leaked.
+//   4. a required key missing from MAPS names the maps URL; missing from DATAS
+//      names the datas URL.
+import { describe as describe2, it as it2, expect as expect2, beforeEach as beforeEach2, afterEach as afterEach2, vi as vi2 } from 'vitest';
+
+const MAPS_URL = '/datas/maps_SGC_v001.json.gz';
+const DATAS_URL = '/datas/datas_SGC_v001.json.gz';
+
+// Slice the merged on-disk fixture into the two halves the CMS publishes.
+// `maps` carries geometry + `mall`; `datas` carries the shop directory.
+// Returns disjoint-key objects so each half can be validated independently and a
+// loader that merged WRONG (e.g. read shops from maps) is observable.
+function splitFixture(merged = loadSgc()) {
+  const maps = {
+    mall: merged.mall,
+    levels: merged.levels,
+    layers: merged.layers,
+    kinds: merged.kinds,
+    units: merged.units,
+    navmesh_by_level: merged.navmesh_by_level,
+    transitions: merged.transitions
+  };
+  const datas = {
+    shops: merged.shops,
+    categories: merged.categories
+  };
+  return { maps, datas };
+}
+
+// URL-keyed fetch: the maps url resolves the maps half, the datas url the datas
+// half; any other url rejects. So the loader must request EXACTLY both halves.
+function installSplitFetch({ maps, datas }, { mapsUrl = MAPS_URL, datasUrl = DATAS_URL } = {}) {
+  globalThis.fetch = vi2.fn().mockImplementation((url) => {
+    if (url === mapsUrl) return Promise.resolve(jsonResponse(maps));
+    if (url === datasUrl) return Promise.resolve(jsonResponse(datas));
+    return Promise.reject(new Error(`unexpected fetch of ${url}`));
+  });
+}
+
+describe2('split-data-loading: BundleLoader.load({mapsUrl, datasUrl})', () => {
+  let loader;
+
+  beforeEach2(async () => {
+    loader = await makeLoader();
+  });
+
+  afterEach2(() => {
+    vi2.restoreAllMocks();
+  });
+
+  // ---- Criterion 1: merged counts equal today's single-bundle counts ----
+  it2('resolves a BundleModel whose merged counts equal today\'s (5/10/158/20/10/2 + mesh keys)', async () => {
+    installSplitFetch(splitFixture());
+    const model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+
+    expect2(model.levels.length).toBe(5);
+    expect2(model.kinds.length).toBe(10);
+    expect2(model.units.length).toBe(158);
+    expect2(model.shops.length).toBe(20);
+    expect2(model.categories.length).toBe(10);
+    expect2(model.transitions.length).toBe(2);
+    // navmesh_by_level carries its level keys (the maps half's mesh, merged through).
+    expect2(Object.keys(model.navmesh_by_level).sort()).toEqual(['1', '2', '4', '5']);
+  });
+
+  it2('fetches BOTH the maps and datas URLs (the two-fetch contract)', async () => {
+    installSplitFetch(splitFixture());
+    await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+
+    const fetched = globalThis.fetch.mock.calls.map((c) => c[0]);
+    expect2(fetched).toContain(MAPS_URL);
+    expect2(fetched).toContain(DATAS_URL);
+  });
+
+  // ---- Criterion 2: merge sources geometry+mall from MAPS, shops+categories from DATAS ----
+  it2('takes `mall` from the maps half and resolves shop/category ids that live only in datas', async () => {
+    const { maps, datas } = splitFixture();
+    // Distinguish the maps half's mall with a sentinel the datas half does NOT carry,
+    // so a model.mall that matched required reading the MAPS input, not datas.
+    maps.mall = { id: 1, name: 'Saigon Centre', code: 'SGC', _from: 'maps-half' };
+    // Pick ids that exist ONLY in the datas half (shops/categories are datas-only).
+    const datasShopId = datas.shops[0].id;
+    const datasCatId = datas.categories[0].id;
+
+    installSplitFetch({ maps, datas });
+    const model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+
+    expect2(model.mall).toEqual({ id: 1, name: 'Saigon Centre', code: 'SGC', _from: 'maps-half' });
+    expect2(model.shopsById.get(datasShopId), 'shopsById must resolve a datas-only shop id').toBeTruthy();
+    expect2(model.shopsById.get(datasShopId).id).toBe(datasShopId);
+    expect2(model.categoriesById.get(datasCatId), 'categoriesById must resolve a datas-only category id').toBeTruthy();
+    expect2(model.categoriesById.get(datasCatId).id).toBe(datasCatId);
+  });
+
+  // ---- Criterion 3: extra datas_ keys are IGNORED (no model field, no validation error) ----
+  it2('ignores extra datas_ keys (banners/events/malls): not BundleModel fields, no rejection', async () => {
+    const { maps, datas } = splitFixture();
+    datas.banners = [{ id: 1, title: 'spring sale' }];
+    datas.events = [{ id: 2, name: 'fashion week' }];
+    datas.malls = [{ id: 3, name: 'sibling mall' }];
+
+    installSplitFetch({ maps, datas });
+    const model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+
+    // Resolves (no validation error) AND the extras never become model fields.
+    expect2(model.levels.length).toBe(5);
+    expect2(Object.prototype.hasOwnProperty.call(model, 'banners')).toBe(false);
+    expect2(Object.prototype.hasOwnProperty.call(model, 'events')).toBe(false);
+    expect2(model.banners).toBeUndefined();
+    expect2(model.events).toBeUndefined();
+    // `malls` (plural CMS list) must not clobber the singular `mall` identity.
+    expect2(model.mall).toEqual({ id: 1, name: 'Saigon Centre', code: 'SGC' });
+  });
+
+  // ---- Criterion 4: a missing required key names the URL of the OFFENDING half ----
+  it2('rejects with a BundleLoadError naming the MAPS url when a geometry key (navmesh_by_level) is missing from maps', async () => {
+    const { maps, datas } = splitFixture();
+    delete maps.navmesh_by_level;
+    installSplitFetch({ maps, datas });
+
+    let caught;
+    try {
+      await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+    } catch (err) {
+      caught = err;
+    }
+    expect2(caught, 'a maps half missing navmesh_by_level must reject').toBeInstanceOf(Error);
+    expect2(caught.name).toBe('BundleLoadError');
+    expect2(caught.message).toContain(MAPS_URL);
+    expect2(caught.message).not.toContain(DATAS_URL);
+  });
+
+  it2('rejects with a BundleLoadError naming the DATAS url when `shops` is missing from datas', async () => {
+    const { maps, datas } = splitFixture();
+    delete datas.shops;
+    installSplitFetch({ maps, datas });
+
+    let caught;
+    try {
+      await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+    } catch (err) {
+      caught = err;
+    }
+    expect2(caught, 'a datas half missing shops must reject').toBeInstanceOf(Error);
+    expect2(caught.name).toBe('BundleLoadError');
+    expect2(caught.message).toContain(DATAS_URL);
+    expect2(caught.message).not.toContain(MAPS_URL);
+  });
+
+  it2('rejects naming the DATAS url when `categories` is missing from datas', async () => {
+    const { maps, datas } = splitFixture();
+    delete datas.categories;
+    installSplitFetch({ maps, datas });
+
+    let caught;
+    try {
+      await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+    } catch (err) {
+      caught = err;
+    }
+    expect2(caught, 'a datas half missing categories must reject').toBeInstanceOf(Error);
+    expect2(caught.name).toBe('BundleLoadError');
+    expect2(caught.message).toContain(DATAS_URL);
+  });
+});
+// <<< TARS cap:split-data-loading

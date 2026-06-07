@@ -1,5 +1,10 @@
 import 'dotenv/config';
 import { execSync } from 'child_process';
+import { existsSync, readdirSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const required = ['DO_SPACES_KEY', 'DO_SPACES_SECRET', 'DO_SPACES_REGION', 'DO_SPACES_BUCKET', 'BUILD_SECRET'];
 for (const name of required) {
@@ -45,15 +50,33 @@ run(
   ` --delete`
 );
 
-// Upload the map data bundle. The gallery pages reference ../datas/SGC_v001.json,
-// which resolves to the bucket root from inside <secret>/.
-console.log(`\nSyncing datas/ to s3://${DO_SPACES_BUCKET}/datas/ ...`);
+// Publish the split map data to the deploy bucket's root `/datas/` — this drives
+// the demo gallery. The pages load data same-origin via
+// `../datas/maps_SGC_v001.json.gz` + `../datas/datas_SGC_v001.json.gz`, which
+// resolve to THIS bucket's root from inside <secret>/ — so the data must live
+// here, not only on the CMS dev bucket (keppelvn-data-dev.indoorcms.com). The CMS
+// publishes to that separate origin; it does NOT populate this bucket, so without
+// this step `/datas/…` 403s.
+//
+// We deploy the local `datas/` mirror AS-IS — refreshing it is a deliberate,
+// separate `npm run data:pull` step so you control which data version ships.
+// Guard against shipping an empty/absent mirror (which would 403 every demo).
+const dataDir = path.join(projectRoot, 'datas');
+const dataFiles = (existsSync(dataDir) ? readdirSync(dataDir) : [])
+  .filter((name) => /^(?:maps|datas)_.*\.json\.gz$/.test(name));
+if (dataFiles.length === 0) {
+  console.error('Error: no datas/{maps,datas}_*.json.gz to deploy.');
+  console.error('Run `npm run data:pull` first to mirror the CMS data locally.');
+  process.exit(1);
+}
+
+console.log(`\nSyncing datas/*.gz to s3://${DO_SPACES_BUCKET}/datas/ ...`);
 run(
   `aws s3 sync "datas/" "s3://${DO_SPACES_BUCKET}/datas/"` +
   ` --endpoint-url "${ENDPOINT}"` +
   ` --acl public-read` +
   ` --cache-control "public, max-age=0"` +
-  ` --delete`
+  ` --exclude "*" --include "maps_*.json.gz" --include "datas_*.json.gz"`
 );
 
 // Upload minified JS

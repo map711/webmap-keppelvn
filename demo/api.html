@@ -8,7 +8,7 @@
     html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
     wayfinder-map { display: block; width: 100vw; height: 100vh; }
 
-    /* Overlay control panel — drives the <wayfinder-map> JS API. */
+    /* Overlay control panel — drives the wayfinder-map JS API. */
     .panel {
       position: fixed;
       top: 12px;
@@ -93,7 +93,8 @@
 </head>
 <body>
   <wayfinder-map
-    data-url="../datas/SGC_v001.json"
+    maps-url="../datas/maps_SGC_v001.json.gz"
+    datas-url="../datas/datas_SGC_v001.json.gz"
     default-floor="L3"
     level-selector
   ></wayfinder-map>
@@ -266,7 +267,7 @@
       });
     };
 
-    // init() auto-runs on connect (data-url is present); wait for ready, but
+    // init() auto-runs on connect (maps-url + datas-url present); wait for ready, but
     // guard against the event having already fired.
     if (map.isInitialized) setup();
     else map.addEventListener("ready", setup, { once: true });

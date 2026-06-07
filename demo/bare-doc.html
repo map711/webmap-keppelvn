@@ -59,13 +59,16 @@
           <h3 class="mb-2 text-base font-semibold text-slate-200">2. Add the map element</h3>
           <p class="mb-3 text-sm text-slate-300">
             Place a <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">&lt;wayfinder-map&gt;</code>
-            element in your HTML. The only required attribute is
-            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">data-url</code> &mdash; a single,
-            self-contained bundle that carries geometry, the destination catalog, the navmesh, and
-            transitions. There is <strong>no</strong> separate <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">map-url</code>.
+            element in your HTML. Both
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">maps-url</code> and
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">datas-url</code> are required &mdash;
+            the CMS publishes the bundle as two halves: a <code>maps_…</code> half (geometry, navmesh,
+            transitions) and a <code>datas_…</code> half (the shop directory). The component fetches both
+            in parallel and merges them.
           </p>
           <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;wayfinder-map
-  data-url="../datas/SGC_v001.json"
+  maps-url="../datas/maps_SGC_v001.json.gz"
+  datas-url="../datas/datas_SGC_v001.json.gz"
   default-floor="L3"
 &gt;&lt;/wayfinder-map&gt;</code></pre>
         </div>
@@ -81,7 +84,8 @@
             so these are usually unnecessary &mdash; tune only if you need per-device zoom or label sizing.
           </p>
           <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;wayfinder-map
-  data-url="../datas/SGC_v001.json"
+  maps-url="../datas/maps_SGC_v001.json.gz"
+  datas-url="../datas/datas_SGC_v001.json.gz"
   default-floor="L3"
   desktop-max-zoom="3"   mobile-max-zoom="2"
   desktop-min-zoom="fit" mobile-min-zoom="fit"
@@ -118,7 +122,8 @@ map.addEventListener("error", (event) =&gt; {
   &lt;/head&gt;
   &lt;body&gt;
     &lt;wayfinder-map
-      data-url="../datas/SGC_v001.json"
+      maps-url="../datas/maps_SGC_v001.json.gz"
+      datas-url="../datas/datas_SGC_v001.json.gz"
       default-floor="L3"
     &gt;&lt;/wayfinder-map&gt;
 
@@ -139,7 +144,8 @@ map.addEventListener("error", (event) =&gt; {
               <tr><th class="px-4 py-3 font-semibold">Attribute</th><th class="px-4 py-3 font-semibold">Description</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800 text-slate-300">
-              <tr><td class="px-4 py-3"><code class="text-sky-300">data-url</code></td><td class="px-4 py-3">Required. URL of the self-contained map bundle.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">maps-url</code></td><td class="px-4 py-3">Required. URL of the <code>maps_…</code> half (geometry + navmesh + transitions).</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">datas-url</code></td><td class="px-4 py-3">Required. URL of the <code>datas_…</code> half (shop directory + categories).</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">default-floor</code></td><td class="px-4 py-3">Floor code to show first (e.g. <code>L3</code>). Codes: B2, B1, L1, L2, L3.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">render-scale</code></td><td class="px-4 py-3">World-coordinate scale. Defaults to 1 (raw CMS coordinates).</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">enable-rotation</code></td><td class="px-4 py-3">Allow two-finger / gesture rotation of the canvas.</td></tr>

@@ -18,6 +18,26 @@ const REQUIRED_KEYS = Object.freeze([
 ]);
 
 /**
+ * The keys the CMS publishes in the `maps_…` (geometry) half: floor/layer
+ * geometry, the navmesh, connector transitions, and the singular `mall` identity.
+ */
+const MAPS_KEYS = Object.freeze([
+  'levels',
+  'layers',
+  'kinds',
+  'units',
+  'navmesh_by_level',
+  'transitions'
+]);
+
+/**
+ * The keys the CMS publishes in the `datas_…` (directory) half: the shop
+ * directory and its categories. Extra `datas_` keys the webmap doesn't consume
+ * (e.g. `banners`, `events`, `malls`) are ignored — not validated, not merged.
+ */
+const DATAS_KEYS = Object.freeze(['shops', 'categories']);
+
+/**
  * Error raised when a fetched bundle is missing a required top-level key or is
  * otherwise structurally invalid. Subclasses {@link Error} so callers can use
  * `instanceof Error` while still discriminating on `name`.
@@ -144,12 +164,19 @@ export class BundleModel {
 }
 
 /**
- * The single-URL loader for the webmap consumer bundle. `load(url)` issues ONE
- * fetch (via the cached/gzip-aware {@link DataLoader}), validates the bundle's
- * required top-level keys, and returns an indexed {@link BundleModel}.
+ * The loader for the webmap consumer bundle. Two call shapes:
  *
- * This replaces the legacy two-URL split (separate `data-url` catalog +
- * `map-url` geometry): the published bundle is self-contained.
+ *   - `load(url)` — ONE fetch of a SELF-CONTAINED bundle (legacy/test path):
+ *     validates ALL required top-level keys and returns an indexed model.
+ *   - `load({mapsUrl, datasUrl})` — the CMS now publishes the bundle SPLIT into
+ *     a `maps_…` (geometry + `mall`) half and a `datas_…` (shop directory) half.
+ *     Both are fetched IN PARALLEL (via the cached/gzip-aware {@link DataLoader}),
+ *     each half is validated against the keys THAT half carries (a missing key
+ *     names the offending half's URL), and the two are MERGED into a single
+ *     bundle object before being indexed by the unchanged {@link BundleModel}.
+ *
+ * The merged object is byte-shape-identical to today's single bundle, so nothing
+ * downstream of {@link BundleModel} observes the split.
  */
 export class BundleLoader {
   #dataLoader;
@@ -162,29 +189,72 @@ export class BundleLoader {
   }
 
   /**
-   * Fetch, validate, and index the bundle at `url`.
-   * @param {string} url
+   * Fetch, validate, and index the bundle.
+   * @param {string|{mapsUrl: string, datasUrl: string}} source - a single
+   *   self-contained bundle URL, or the split `{mapsUrl, datasUrl}` pair.
    * @returns {Promise<BundleModel>}
-   * @throws {BundleLoadError} when the bundle is missing a required top-level key
+   * @throws {BundleLoadError} when a fetched half is missing a required key
    */
-  async load(url) {
+  async load(source) {
+    if (source && typeof source === 'object') {
+      return this.#loadSplit(source.mapsUrl, source.datasUrl);
+    }
+    const url = source;
     const bundle = await this.#dataLoader.load(url);
-    this.#validate(bundle, url);
+    this.#validate(bundle, url, REQUIRED_KEYS);
     return new BundleModel(bundle);
+  }
+
+  /**
+   * Fetch the two remote halves in parallel, validate each against the keys it
+   * is supposed to carry, and merge them into one indexed model.
+   * @param {string} mapsUrl - the `maps_…` (geometry + `mall`) half
+   * @param {string} datasUrl - the `datas_…` (shop directory) half
+   * @returns {Promise<BundleModel>}
+   * @throws {BundleLoadError} naming the URL of the offending half
+   */
+  async #loadSplit(mapsUrl, datasUrl) {
+    const [maps, datas] = await Promise.all([
+      this.#dataLoader.load(mapsUrl),
+      this.#dataLoader.load(datasUrl)
+    ]);
+
+    // Validate each half against the keys IT carries, so a missing key names the
+    // offending half's URL (the maps half owns geometry + mall; the datas half
+    // owns the shop directory).
+    this.#validate(maps, mapsUrl, MAPS_KEYS);
+    this.#validate(datas, datasUrl, DATAS_KEYS);
+
+    // Merge: geometry + `mall` from the maps half, shops + categories from the
+    // datas half. Only the consumed keys cross over — extra `datas_` keys
+    // (banners/events/malls) are ignored, never becoming model fields.
+    const merged = {
+      mall: maps.mall ?? null,
+      levels: maps.levels,
+      layers: maps.layers,
+      kinds: maps.kinds,
+      units: maps.units,
+      navmesh_by_level: maps.navmesh_by_level,
+      transitions: maps.transitions,
+      shops: datas.shops,
+      categories: datas.categories
+    };
+    return new BundleModel(merged);
   }
 
   /**
    * @param {any} bundle
    * @param {string} url
+   * @param {readonly string[]} requiredKeys - the keys this source must carry
    * @throws {BundleLoadError}
    */
-  #validate(bundle, url) {
+  #validate(bundle, url, requiredKeys) {
     if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
       throw new BundleLoadError(`Bundle at ${url} is not a JSON object`, url);
     }
 
     const missing = [];
-    for (const key of REQUIRED_KEYS) {
+    for (const key of requiredKeys) {
       if (!Object.prototype.hasOwnProperty.call(bundle, key) || bundle[key] == null) {
         missing.push(key);
       }
@@ -198,15 +268,15 @@ export class BundleLoader {
 
     // `navmesh_by_level` is an object keyed by stringified level id; the rest
     // are arrays. A wrong container shape is as broken as an absent key.
-    for (const key of REQUIRED_KEYS) {
+    for (const key of requiredKeys) {
       if (key === 'navmesh_by_level') {
         if (typeof bundle[key] !== 'object' || Array.isArray(bundle[key])) {
-          throw new BundleLoadError(`Bundle "${key}" must be an object`, url);
+          throw new BundleLoadError(`Bundle "${key}" at ${url} must be an object`, url);
         }
         continue;
       }
       if (!Array.isArray(bundle[key])) {
-        throw new BundleLoadError(`Bundle "${key}" must be an array`, url);
+        throw new BundleLoadError(`Bundle "${key}" at ${url} must be an array`, url);
       }
     }
   }

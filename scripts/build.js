@@ -53,8 +53,10 @@ try {
     // Rewrite import paths from ./dist/... or ../dist/... to ../wayfinder-map.min.js.
     // The gallery lands under <secret>/, so the bundle one level up (../) maps to
     // the bucket-root wayfinder-map.min.js that deploy.js uploads. The demos'
-    // ../datas/ refs resolve the same way (deploy uploads that dir to the bucket
-    // root too).
+    // ../datas/maps_*.json.gz + ../datas/datas_*.json.gz refs resolve the same way
+    // to the bucket-root /datas/, which deploy.js publishes from the local
+    // `datas/` mirror (refreshed separately via `npm run data:pull`) — the demos
+    // load same-origin, so no CORS.
     content = content.replace(
       /(?:\.\.\/|\.\/)dist\/wayfinder-map\.esm\.js/g,
       '../wayfinder-map.min.js'

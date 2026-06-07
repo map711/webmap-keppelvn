@@ -465,7 +465,8 @@ describe('route-markers: start/end pins + floor-transition bubbles', () => {
       const MapEngine = await importMapEngine();
       globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(makeRoutingBundle()));
       const engine = new MapEngine(new globalThis.HTMLCanvasElement(), {
-        dataUrl: '/bundle.json',
+        mapsUrl: '/maps_bundle.json.gz',
+        datasUrl: '/datas_bundle.json.gz',
         renderScale: 1,
         defaultFloor: 'F1'
       });

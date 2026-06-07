@@ -396,7 +396,8 @@ async function mountRealEngineComponent({ mobile = false, bundle } = {}) {
   expect(mod.WayfinderMapElement, 'WayfinderMap.js must export WayfinderMapElement').toBeTypeOf('function');
 
   const el = new mod.WayfinderMapElement();
-  el.setAttribute('data-url', '/bundle.json');
+  el.setAttribute('maps-url', '/maps_bundle.json.gz');
+  el.setAttribute('datas-url', '/datas_bundle.json.gz');
   el.setAttribute('search-control', '');
   el.setAttribute('default-floor', 'F1');
   await el.init();
@@ -512,7 +513,8 @@ async function mountBusComponent() {
   } catch { mod = null; }
   expect(mod, 'src/component/WayfinderMap.js must exist and export WayfinderMapElement').not.toBeNull();
   const el = new mod.WayfinderMapElement();
-  el.setAttribute('data-url', '/bundle.json');
+  el.setAttribute('maps-url', '/maps_bundle.json.gz');
+  el.setAttribute('datas-url', '/datas_bundle.json.gz');
   await el.init();
   return { el, engine: wiredEngineRef.current };
 }

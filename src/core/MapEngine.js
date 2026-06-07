@@ -799,14 +799,16 @@ export class MapEngine {
   }
 
   async #loadData() {
-    const dataUrl = this.#config.get('dataUrl');
+    const mapsUrl = this.#config.get('mapsUrl');
+    const datasUrl = this.#config.get('datasUrl');
     const renderScale = this.#config.get('renderScale');
 
-    // Single self-contained bundle fetch — the legacy parallel `map-url` request
-    // is gone. BundleLoader validates the bundle and rejects (no model) when a
-    // required top-level key is missing, so a structurally broken bundle never
-    // reaches the stores (and `data:loaded` is never emitted for it).
-    const bundle = await this.#bundleLoader.load(dataUrl);
+    // Two parallel fetches of the CMS-split halves (`maps_…` geometry +
+    // `datas_…` directory) — the legacy single `data-url` / parallel `map-url`
+    // path is gone. BundleLoader validates each half and rejects (no model) when
+    // a required key is missing, so a structurally broken half never reaches the
+    // stores (and `data:loaded` is never emitted for it).
+    const bundle = await this.#bundleLoader.load({ mapsUrl, datasUrl });
     this.#bundleModel = bundle;
 
     // Both stores hydrate from the one parsed bundle object.

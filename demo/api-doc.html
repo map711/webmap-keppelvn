@@ -53,7 +53,7 @@
             Same import boilerplate as every demo: a single module import that registers the
             custom element.
           </p>
-          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;wayfinder-map data-url="../datas/SGC_v001.json" default-floor="L3" level-selector&gt;&lt;/wayfinder-map&gt;
+          <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;wayfinder-map maps-url="../datas/maps_SGC_v001.json.gz" datas-url="../datas/datas_SGC_v001.json.gz" default-floor="L3" level-selector&gt;&lt;/wayfinder-map&gt;
 
 &lt;script type="module"&gt;
   import "../dist/wayfinder-map.esm.js";
@@ -65,8 +65,10 @@
           <h3 class="mb-2 text-base font-semibold text-slate-200">2. Wait for <code class="text-sky-300">ready</code> before calling methods</h3>
           <p class="mb-3 text-sm text-slate-300">
             <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">init()</code> runs
-            automatically on connect when <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">data-url</code>
-            is present, but it is asynchronous (it fetches the bundle). Calling a method before the
+            automatically on connect when both
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">maps-url</code> and
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">datas-url</code>
+            are present, but it is asynchronous (it fetches both halves). Calling a method before the
             engine is ready throws <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">"wayfinder-map: Not initialized"</code>.
             Wait for the <code class="rounded bg-slate-800 px-1.5 py-0.5 text-sky-300">ready</code>
             event &mdash; and guard against it having already fired.
@@ -132,7 +134,7 @@ map.focusLocation("shop:4", { animate: true });</code></pre>
               <tr><th class="px-4 py-3 font-semibold">Method</th><th class="px-4 py-3 font-semibold">Description</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800 text-slate-300">
-              <tr><td class="px-4 py-3"><code class="text-sky-300">init()</code></td><td class="px-4 py-3">Boot the engine. Auto-runs on connect when <code>data-url</code> is set; returns a Promise.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">init()</code></td><td class="px-4 py-3">Boot the engine. Auto-runs on connect when both <code>maps-url</code> and <code>datas-url</code> are set; returns a Promise.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">navigateTo({ from, to, mode?, animate?, duration?, scale?, connectorConstraint?, stepFree? })</code></td><td class="px-4 py-3">Route between two location IDs. Returns a result (see below); dispatches <code>route-found</code> / <code>route-error</code>.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">focusLocation(id, { clearRoute?, switchFloor?, animate?, duration?, scale? })</code></td><td class="px-4 py-3">Pin &amp; zoom a single location (no route). Returns <code>{ success, location, node, floor }</code>; dispatches <code>location-tap</code>.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">clearRoute()</code></td><td class="px-4 py-3">Return to browse mode, remove route/pin. Dispatches <code>route-cleared</code>.</td></tr>
@@ -229,7 +231,8 @@ map.addEventListener("floor-changed", (e) =&gt; console.log("floor", e.detail));
   &lt;/head&gt;
   &lt;body&gt;
     &lt;wayfinder-map
-      data-url="../datas/SGC_v001.json"
+      maps-url="../datas/maps_SGC_v001.json.gz"
+      datas-url="../datas/datas_SGC_v001.json.gz"
       default-floor="L3"
       level-selector
     &gt;&lt;/wayfinder-map&gt;

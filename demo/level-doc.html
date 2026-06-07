@@ -64,7 +64,8 @@
             controls are independent, so omitting them simply hides the search panel and locks rotation.
           </p>
           <pre class="overflow-x-auto rounded-xl bg-slate-800 p-5 text-sm leading-relaxed"><code class="text-slate-200">&lt;wayfinder-map
-  data-url="../datas/SGC_v001.json"
+  maps-url="../datas/maps_SGC_v001.json.gz"
+  datas-url="../datas/datas_SGC_v001.json.gz"
   default-floor="L3"
   level-selector
 &gt;&lt;/wayfinder-map&gt;</code></pre>
@@ -99,7 +100,8 @@ map.addEventListener("location-disambiguate", (e) =&gt; console.log("multi-tenan
   &lt;/head&gt;
   &lt;body&gt;
     &lt;wayfinder-map
-      data-url="../datas/SGC_v001.json"
+      maps-url="../datas/maps_SGC_v001.json.gz"
+      datas-url="../datas/datas_SGC_v001.json.gz"
       default-floor="L3"
       level-selector
     &gt;&lt;/wayfinder-map&gt;
@@ -121,7 +123,8 @@ map.addEventListener("location-disambiguate", (e) =&gt; console.log("multi-tenan
               <tr><th class="px-4 py-3 font-semibold">Attribute</th><th class="px-4 py-3 font-semibold">Description</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-800 text-slate-300">
-              <tr><td class="px-4 py-3"><code class="text-sky-300">data-url</code></td><td class="px-4 py-3">Required. URL of the self-contained map bundle.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">maps-url</code></td><td class="px-4 py-3">Required. URL of the <code>maps_…</code> half (geometry + navmesh + transitions).</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">datas-url</code></td><td class="px-4 py-3">Required. URL of the <code>datas_…</code> half (shop directory + categories).</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">default-floor</code></td><td class="px-4 py-3">Floor code to show first (B2, B1, L1, L2, L3).</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">level-selector</code></td><td class="px-4 py-3">Boolean. Show the built-in floor switcher.</td></tr>
             </tbody>
