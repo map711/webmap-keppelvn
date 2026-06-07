@@ -297,11 +297,17 @@ export class LocationLayer extends Layer {
     ctx.save();
     ctx.translate(wx, wy);
 
+    // The global canvas transform already applied rotate(θ) (the map rotation);
+    // this frame is in world space. So the label's OWN rotation must add only its
+    // node rotation (+ a readability flip) — NOT θ again, or the label spins at
+    // 2θ and rotates relative to the unit it names. `flip` is keyed on the net
+    // SCREEN orientation (θ + nodeRot) so text never reads upside-down; this
+    // matches the orientation `#screenRect` measures for overlap thinning.
     const nodeRot = node.rotation || 0;
     const twoPI = Math.PI * 2;
     const net = ((rotation + nodeRot) % twoPI + twoPI) % twoPI;
     const flip = (net > Math.PI / 2 && net < 3 * Math.PI / 2) ? Math.PI : 0;
-    ctx.rotate(rotation + nodeRot + flip);
+    ctx.rotate(nodeRot + flip);
 
     // Counter-scale by 1/scale so the screen-space font stays constant across
     // world zoom. NO _fitScale unit-shrink — the size is unit-independent.

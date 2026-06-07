@@ -20,6 +20,14 @@ suppression so labels read cleanly rather than colliding.
   catalog at `DisplayNode` build time; the layer does **no** polylabel/OBB
   recompute. A net-rotation **flip** (`+π` when the net angle falls in the
   left half-plane) keeps text upright.
+- **Label orientation is locked to its unit, not double-rotated by the map.** The
+  per-label `ctx.save()` frame already inherits the **global** canvas `rotate(θ)`
+  (the map rotation), so the layer's own contribution is `rotate(nodeRot + flip)`
+  **only** — it must NOT re-add `θ`. (The earlier `rotate(rotation + nodeRot + flip)`
+  spun every label at `2θ`, visibly rotating it against the unit it names.) The
+  `flip` is still keyed on the **net screen** orientation `θ + nodeRot` (so text
+  never reads upside-down), matching the orientation `#screenRect` measures for
+  overlap thinning.
 - **Zoom-responsive screen-space font (the re-work).** The drawn font px is
   `max(minFontSize·dpr, fontSize·√scale·dpr)` — a `minFontSize·dpr` **floor**
   with a **√scale** growth curve above it — applied once to `ctx.font`, then
@@ -95,6 +103,10 @@ suppression so labels read cleanly rather than colliding.
 - **Invariant:** rotation is stored/consumed in **radians** (deg→rad converted in
   the catalog); the layer applies a net-rotation `+π` flip for upright text but
   never re-derives label geometry.
+- **Invariant (bug fix):** the label's local `ctx.rotate` is `nodeRot + flip` —
+  the global map `rotate(θ)` is already applied by the canvas transform, so the
+  layer must never re-add `θ` (doing so double-rotates labels to `2θ`). The flip
+  is still computed from the net `θ + nodeRot` screen orientation.
 
 ## UX & accessibility
 
@@ -126,3 +138,7 @@ suppression so labels read cleanly rather than colliding.
   identical renders, recompute on scale change), zoom-gesture freeze +
   `endZoom`→idle `invalidate` exactly once after advancing fake timers, and the
   labelable-gate regression (tenanted shop labelled, vacant shop / escalator not).
+  **Criterion 9 (rotation lock):** the canvas shim now tracks a cumulative
+  `_rotStack` mirroring the scale stack and records each glyph's `netRotation`;
+  the test renders the same label at map rotation `0` and `0.4` and asserts the
+  layer's own recorded rotation is invariant (no double-`θ`).

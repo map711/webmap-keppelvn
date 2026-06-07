@@ -84,18 +84,28 @@ function installCanvasShim() {
       // Per-fillText records: { text, fontPx, scaleX, scaleY, effFontPx }.
       _draws: [],
       _scaleStack: [{ x: 1, y: 1 }],
+      // Cumulative rotation per frame, mirroring the scale stack, so each
+      // fillText records the NET rotation applied to the drawn glyph.
+      _rotStack: [0],
       _measureCalls: [],
       get _scaleX() { return ctx._scaleStack[ctx._scaleStack.length - 1].x; },
       get _scaleY() { return ctx._scaleStack[ctx._scaleStack.length - 1].y; },
+      get _rot() { return ctx._rotStack[ctx._rotStack.length - 1]; },
       save() {
         const top = ctx._scaleStack[ctx._scaleStack.length - 1];
         ctx._scaleStack.push({ x: top.x, y: top.y });
+        ctx._rotStack.push(ctx._rotStack[ctx._rotStack.length - 1]);
       },
       restore() {
         if (ctx._scaleStack.length > 1) ctx._scaleStack.pop();
+        if (ctx._rotStack.length > 1) ctx._rotStack.pop();
       },
       translate() {},
-      rotate() {},
+      rotate(a) {
+        if (Number.isFinite(a)) {
+          ctx._rotStack[ctx._rotStack.length - 1] += a;
+        }
+      },
       scale(sx, sy) {
         const top = ctx._scaleStack[ctx._scaleStack.length - 1];
         top.x *= (Number.isFinite(sx) ? sx : 1);
@@ -127,7 +137,8 @@ function installCanvasShim() {
           fontPx,
           scaleX,
           scaleY,
-          effFontPx: fontPx * scaleX
+          effFontPx: fontPx * scaleX,
+          netRotation: ctx._rot
         });
       }
     };
@@ -587,6 +598,43 @@ describe('map-labels: the labelable gate still selects only tenanted tenant-kind
     expect(texts.some((t) => /escalator/i.test(t))).toBe(false);
     // Exactly one label total on this level (only unit 301 is labelable).
     expect(texts.length).toBe(1);
+  });
+});
+// =============================================================================
+// Criterion 9 — a label stays locked to its unit: rotating the MAP must not
+// rotate the label relative to its polygon. The layer draws UNDER the global
+// canvas rotate(θ); its own contribution must NOT re-add θ (else the label
+// spins at 2θ and visibly rotates against the unit it names).
+// =============================================================================
+describe('map-labels: label orientation is locked to its unit, not double-rotated by the map', () => {
+  let shim;
+  beforeEach(() => { shim = installCanvasShim(); });
+  afterEach(() => { shim.restore(); });
+
+  it('applies the same local rotation regardless of map rotation (no double-θ)', async () => {
+    const LocationLayer = await importLocationLayer();
+    const { store } = await buildCatalog(makeSingleShopBundle({ name: 'Solo', label_rotation: 0 }));
+
+    // Two map rotations, both small enough that the readability flip is inactive
+    // (net = θ + nodeRot stays within the upright zone). The layer renders with
+    // an identity base ctx, so the rotation it records is its OWN contribution.
+    const ctxA = shim.makeCtx();
+    render(makeLayer(LocationLayer, store, 'M1'), ctxA, { scale: 1, dpr: 1, rotation: 0 });
+
+    const ctxB = shim.makeCtx();
+    render(makeLayer(LocationLayer, store, 'M1'), ctxB, { scale: 1, dpr: 1, rotation: 0.4 });
+
+    const rotA = ctxA._draws.find((d) => d.text === 'Solo')?.netRotation;
+    const rotB = ctxB._draws.find((d) => d.text === 'Solo')?.netRotation;
+    expect(rotA, 'a label must be drawn at rotation 0').toBeDefined();
+    expect(rotB, 'a label must be drawn at rotation 0.4').toBeDefined();
+
+    // nodeRot=0 and no flip -> the layer adds no local rotation; the global
+    // rotate(θ) alone carries the label around with its unit.
+    expect(rotA).toBeCloseTo(0, 6);
+    // The layer's own rotation is invariant to the map's rotation: the label
+    // does not rotate relative to its polygon.
+    expect(rotB).toBeCloseTo(rotA, 6);
   });
 });
 // <<< TARS cap:map-labels
