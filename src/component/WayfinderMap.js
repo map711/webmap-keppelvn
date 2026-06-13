@@ -70,6 +70,12 @@ class WayfinderMapElement extends HTMLElement {
       'min-zoom',
       'desktop-min-zoom',
       'mobile-min-zoom',
+      'reward-buffer',
+      'desktop-reward-buffer',
+      'mobile-reward-buffer',
+      'reward-buffer-factor',
+      'desktop-reward-buffer-factor',
+      'mobile-reward-buffer-factor',
       'label-font-size',
       'desktop-label-font-size',
       'mobile-label-font-size',
@@ -1008,6 +1014,22 @@ class WayfinderMapElement extends HTMLElement {
       if (fallbackMinZoom !== undefined) config.minZoom = fallbackMinZoom;
     }
 
+    const rewardBuffer = this.#getResponsiveNumberAttr('reward-buffer');
+    if (rewardBuffer !== undefined) {
+      config.rewardBuffer = rewardBuffer;
+    } else {
+      const fallbackRewardBuffer = this.#getNumberAttr('reward-buffer');
+      if (fallbackRewardBuffer !== undefined) config.rewardBuffer = fallbackRewardBuffer;
+    }
+
+    const rewardBufferFactor = this.#getResponsiveNumberAttr('reward-buffer-factor');
+    if (rewardBufferFactor !== undefined) {
+      config.rewardBufferFactor = rewardBufferFactor;
+    } else {
+      const fallbackRewardBufferFactor = this.#getNumberAttr('reward-buffer-factor');
+      if (fallbackRewardBufferFactor !== undefined) config.rewardBufferFactor = fallbackRewardBufferFactor;
+    }
+
     const labelFontSize = this.#getResponsiveNumberAttr('label-font-size');
     if (labelFontSize !== undefined) {
       config.labelFontSize = labelFontSize;
@@ -1453,6 +1475,7 @@ class WayfinderMapElement extends HTMLElement {
       'route:modeChanged': 'route-mode-changed',
       'data:loaded': 'data-loaded',
       'tap:floor-transition': 'floor-transition-tap',
+      'tap:reward': 'reward-tap',
       'tap:location': 'location-tap',
       'tap:disambiguate': 'location-disambiguate',
       'tap:floor': 'floor-tap',

@@ -42,6 +42,15 @@ const CONFIG_SCHEMA = {
   iconEscalator: { type: 'string', default: null },
   enableRotation: { type: 'boolean', default: true },
 
+  // Reward markers
+  // Near-path buffer (world units) for the reward-marker selection. `rewardBuffer`
+  // is an absolute override (default null => the relative factor path wins);
+  // otherwise the buffer is auto-derived as `rewardBufferFactor × the median
+  // placed-shop extent` — one global threshold, like the relative zoom ceiling,
+  // so it tracks the bundle's coordinate scale instead of a guessed constant.
+  rewardBuffer: { type: 'number', default: null, responsive: true },
+  rewardBufferFactor: { type: 'number', default: 1, responsive: true },
+
   // Navigation
   defaultFloor: { type: 'string', default: null },
   youAreHereNodeId: { type: 'number', default: null },

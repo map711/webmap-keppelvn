@@ -4,13 +4,16 @@ import { DataLoader } from '../data/DataLoader.js';
 import { BundleLoader } from '../data/BundleLoader.js';
 import { LocationStore } from '../data/LocationModel.js';
 import { MapGeometryStore } from '../data/MapGeometryModel.js';
+import { RewardStore } from '../data/RewardStore.js';
 import { PathFinder } from '../navigation/PathFinder.js';
 import { RouteManager } from '../navigation/RouteManager.js';
 import { buildNavGraph } from '../navigation/NavGraph.js';
+import { rewardRouteMatch, deriveRewardBuffer } from '../navigation/RewardRouteMatch.js';
 import { Renderer } from '../renderer/Renderer.js';
 import { FloorLayer } from '../layers/FloorLayer.js';
 import { LocationLayer } from '../layers/LocationLayer.js';
 import { NavigationLayer } from '../layers/NavigationLayer.js';
+import { RewardMarkerLayer } from '../layers/RewardMarkerLayer.js';
 import { PinMarkerLayer } from '../layers/PinMarkerLayer.js';
 import { NavMarkerLayer } from '../layers/NavMarkerLayer.js';
 import { GestureRecognizer } from '../interaction/GestureRecognizer.js';
@@ -36,6 +39,7 @@ export class MapEngine {
   #bundleLoader;
   #locationStore;
   #mapGeometryStore;
+  #rewardStore;
   #bundleModel = null;
 
   #pathFinder;
@@ -46,8 +50,15 @@ export class MapEngine {
   #floorLayer;
   #locationLayer;
   #navigationLayer;
+  #rewardMarkerLayer;
   #pinMarkerLayer;
   #navMarkerLayer;
+
+  /** @type {Array} the active rewardRouteMatch() selection (full, all floors) */
+  #rewardSelection = [];
+
+  /** @type {number} near-path buffer (world units) for the reward selection */
+  #rewardBuffer = Infinity;
 
   #gestureRecognizer;
   #hitTestManager;
@@ -83,6 +94,7 @@ export class MapEngine {
     this.#bundleLoader = new BundleLoader(this.#dataLoader);
     this.#locationStore = new LocationStore(this.#dataLoader);
     this.#mapGeometryStore = new MapGeometryStore(this.#dataLoader);
+    this.#rewardStore = new RewardStore();
 
     this.#renderer = new Renderer(canvas, this.#eventBus, {
       showFps: this.#config.get('showFps')
@@ -225,6 +237,7 @@ export class MapEngine {
     this.#floorLayer.setMapLevel(mapLevel);
     this.#locationLayer.setFloor(floorCode);
     this.#navigationLayer.setFloor(floorCode);
+    this.#rewardMarkerLayer.setFloor(floorCode);
     this.#pinMarkerLayer.setFloor(floorCode);
     this.#navMarkerLayer.setFloor(floorCode);
 
@@ -272,6 +285,7 @@ export class MapEngine {
       this.#pinMarkerLayer.setPath(result);
       this.#pinMarkerLayer.setYouAreHereVisible(false);
       this.#navMarkerLayer.setPath(result);
+      this.#updateRewardSelection(result);
 
       const startAnchor = result.startAnchor;
       const startFloor = startAnchor?.levelCode;
@@ -327,6 +341,7 @@ export class MapEngine {
       this.#pinMarkerLayer.setPath(result);
       this.#pinMarkerLayer.setYouAreHereVisible(false);
       this.#navMarkerLayer.setPath(result);
+      this.#updateRewardSelection(result);
 
       const startAnchor = result.startAnchor;
       const startFloor = startAnchor?.levelCode;
@@ -456,6 +471,7 @@ export class MapEngine {
     this.#pinMarkerLayer.clear();
     this.#pinMarkerLayer.setYouAreHereVisible(true);
     this.#navMarkerLayer.clear();
+    this.#updateRewardSelection(null);
 
     this.#renderer.requestRender();
   }
@@ -829,10 +845,27 @@ export class MapEngine {
     this.#hydrateStore(this.#locationStore, bundle, { renderScale });
     this.#hydrateStore(this.#mapGeometryStore, bundle, { renderScale });
 
+    // The reward catalog hydrates from the SAME parsed model plus the (now
+    // hydrated) placed-shop catalog; it never fetches. `now` defaults to the
+    // current instant so the active-window filter evaluates deterministically.
+    this.#rewardStore.hydrate(bundle, {
+      catalog: this.#locationStore,
+      now: new Date()
+    });
+
     this.#floors = this.#mapGeometryStore.getFloorCodes();
     this.#zoomEnvelope = computeEnvelope(
       this.#floors.map((code) => this.#mapGeometryStore.getLevelByCode(code)?.getBounds?.())
     );
+
+    // One global near-path buffer for the reward selection, auto-derived from the
+    // placed shops' own sizes (or an absolute `rewardBuffer` override) so the
+    // proximity gate tracks the bundle's coordinate scale. Resolved once here.
+    this.#rewardBuffer = deriveRewardBuffer(this.#locationStore, {
+      factor: this.#config.get('rewardBufferFactor'),
+      override: this.#config.get('rewardBuffer'),
+      envelope: this.#zoomEnvelope
+    });
 
     this.#eventBus.emit('data:loaded', {
       locationCount: this.#locationStore.locations.length,
@@ -887,6 +920,7 @@ export class MapEngine {
     this.#floorLayer = new FloorLayer();
     this.#locationLayer = new LocationLayer(this.#locationStore);
     this.#navigationLayer = new NavigationLayer();
+    this.#rewardMarkerLayer = new RewardMarkerLayer(this.#currentFloor);
     this.#pinMarkerLayer = new PinMarkerLayer();
     this.#navMarkerLayer = new NavMarkerLayer();
 
@@ -939,6 +973,9 @@ export class MapEngine {
     layers.add(this.#floorLayer);
     layers.add(this.#navigationLayer);
     layers.add(this.#locationLayer);
+    // Reward seals draw ABOVE the labels but BELOW the start/end pin + connector
+    // bubbles, so the wayfinding markers always sit on top.
+    layers.add(this.#rewardMarkerLayer);
     layers.add(this.#pinMarkerLayer);
     layers.add(this.#navMarkerLayer);
   }
@@ -1000,6 +1037,11 @@ export class MapEngine {
       // the navigation/focus pan paths use.
       this.setFloor(result.targetFloor, { fitToBounds: false });
     });
+
+    // A reward-seal tap needs NO engine-side handler: HitTestManager.#classifyHit
+    // already attaches the clean {shopId, rewards, location} payload to the single
+    // generic `tap:reward` emit, so the engine doesn't re-emit (a second emit fired
+    // reward-tap twice, the first with a malformed detail).
   }
 
   #wireEvents() {
@@ -1084,9 +1126,35 @@ export class MapEngine {
       this.#floorLayer
       && this.#locationLayer
       && this.#navigationLayer
+      && this.#rewardMarkerLayer
       && this.#pinMarkerLayer
       && this.#navMarkerLayer
     );
+  }
+
+  /**
+   * Recompute the reward-marker selection from a route result and push it onto
+   * the reward layer. The pure {@link rewardRouteMatch} matcher reads the
+   * route's per-floor `segments`, the placed-shop catalog, the active-reward
+   * store, and the auto-derived near-path `#rewardBuffer` (so a shop off the line
+   * is dropped); the layer itself filters the full selection down to the active
+   * floor at render time. A null/failed route clears the selection.
+   * @param {Object|null} result
+   */
+  #updateRewardSelection(result) {
+    if (!this.#rewardMarkerLayer) return;
+    if (!result || result.success !== true) {
+      this.#rewardSelection = [];
+      this.#rewardMarkerLayer.setSelection([]);
+      return;
+    }
+    this.#rewardSelection = rewardRouteMatch({
+      route: result,
+      locationStore: this.#locationStore,
+      rewardStore: this.#rewardStore,
+      buffer: this.#rewardBuffer
+    }) || [];
+    this.#rewardMarkerLayer.setSelection(this.#rewardSelection);
   }
 
   // Runs after every fitToBounds (which set min = the floor's fit scale). Restores

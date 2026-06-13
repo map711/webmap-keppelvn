@@ -81,6 +81,14 @@ export class BundleModel {
     /** @type {Array} */ this.transitions = bundle.transitions;
 
     /**
+     * Loyalty rewards (OPTIONAL): the `datas_…` half MAY carry a
+     * `rewards: [{id, shops:[...], ...}]` list. Absent -> an empty array, so
+     * downstream consumers always read an array. Verbatim otherwise.
+     * @type {Array}
+     */
+    this.rewards = Array.isArray(bundle.rewards) ? bundle.rewards : [];
+
+    /**
      * Object keyed by stringified level id; a level with no buildable mesh is
      * ABSENT (not present-with-empty). Preserved verbatim.
      * @type {Object<string, Object>}
@@ -116,6 +124,26 @@ export class BundleModel {
     this.categoriesById = new Map();
     for (const category of this.categories) {
       if (category && category.id != null) this.categoriesById.set(category.id, category);
+    }
+
+    /**
+     * Rewards indexed by shop id. A reward listing N shops is indexed under
+     * EVERY one of its `shops[]`, mirroring `shopsById`: `.get(shopId)` returns
+     * the rewards that touch that shop. A shop with no reward is absent (so
+     * `.get` yields `undefined`).
+     * @type {Map<number, Array>}
+     */
+    this.rewardsByShopId = new Map();
+    for (const reward of this.rewards) {
+      if (!reward || !Array.isArray(reward.shops)) continue;
+      for (const shopId of reward.shops) {
+        let group = this.rewardsByShopId.get(shopId);
+        if (!group) {
+          group = [];
+          this.rewardsByShopId.set(shopId, group);
+        }
+        group.push(reward);
+      }
     }
 
     /**
@@ -228,6 +256,8 @@ export class BundleLoader {
     // Merge: geometry + `mall` from the maps half, shops + categories from the
     // datas half. Only the consumed keys cross over — extra `datas_` keys
     // (banners/events/malls) are ignored, never becoming model fields.
+    // `rewards` is an OPTIONAL datas-half key carried through verbatim when
+    // present; BundleModel defaults a missing `rewards` to an empty array.
     const merged = {
       mall: maps.mall ?? null,
       levels: maps.levels,
@@ -237,7 +267,8 @@ export class BundleLoader {
       navmesh_by_level: maps.navmesh_by_level,
       transitions: maps.transitions,
       shops: datas.shops,
-      categories: datas.categories
+      categories: datas.categories,
+      rewards: datas.rewards
     };
     return new BundleModel(merged);
   }

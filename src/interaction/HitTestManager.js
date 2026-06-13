@@ -72,12 +72,19 @@ export class HitTestManager {
       return;
     }
 
-    const { type, locations } = this.#classifyHit(result);
-    this.#eventBus.emit(`tap:${type}`, {
-      ...tapEvent,
-      hitResult: result,
-      locations
-    });
+    const { type, locations, payload } = this.#classifyHit(result);
+    // A self-describing hit (e.g. reward) carries its own clean payload — emit
+    // that verbatim so the single generic emit is canonical; the handler then
+    // performs only a side-effect and never re-emits (the floor-transition
+    // pattern). Otherwise emit the standard tap envelope.
+    this.#eventBus.emit(
+      `tap:${type}`,
+      payload ?? {
+        ...tapEvent,
+        hitResult: result,
+        locations
+      }
+    );
 
     const handler = this.#handlers.get(type);
     if (handler) {
@@ -87,8 +94,10 @@ export class HitTestManager {
 
   /**
    * Classify a raw hit result into a tap type (and any resolved Locations).
+   * A self-describing hit may also carry a `payload` — the clean detail to emit
+   * verbatim as the tap event (so #onTap fires it exactly once, no re-emit).
    * @param {any} result
-   * @returns {{type:string, locations:Array}}
+   * @returns {{type:string, locations:Array, payload?:object}}
    */
   #classifyHit(result) {
     // A connector-bubble hit is self-describing — route it to the
@@ -96,6 +105,22 @@ export class HitTestManager {
     // string would otherwise be misread as a unit id).
     if (result && result.type === 'floor-transition') {
       return { type: 'floor-transition', locations: [] };
+    }
+
+    // A reward-marker hit is likewise self-describing — short-circuit before
+    // the unit-id path so the reward payload isn't misread as a unit id. It
+    // carries its own clean {shopId, rewards, location} payload so #onTap emits
+    // exactly ONE tap:reward with the documented shape (no handler re-emit).
+    if (result && result.type === 'reward') {
+      return {
+        type: 'reward',
+        locations: [],
+        payload: {
+          shopId: result.shopId,
+          rewards: result.rewards,
+          location: result.location
+        }
+      };
     }
 
     const unitId = this.#extractUnitId(result);

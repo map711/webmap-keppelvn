@@ -106,6 +106,18 @@ Project map + decisions live in `overview.md`; per-capability records in
   misread as a unit id and the tap silently no-ops). `HitTestManager.#classifyHit`
   short-circuits on `result.type === 'floor-transition'` **before** unit-id
   extraction. Don't collapse `hitTest` back to a plain code.
+- **Reward seals are self-describing hits too, and emit ONCE.**
+  `RewardMarkerLayer.hitTest` returns `{type:'reward', shopId, rewards, location}`;
+  `#classifyHit` short-circuits on `type === 'reward'` **before** unit-id extraction
+  and attaches a clean `payload` that `#onTap` emits **verbatim as the single**
+  `tap:reward` — the engine registers **no** reward handler and **never re-emits**
+  (a second emit double-fired `reward-tap` with a malformed first detail; a test
+  that self-wires the re-emit hides it — a mutation must go RED). `rewards` rides
+  the `datas_…` half as an **optional, unvalidated** key (default `[]`; every
+  fixture lacks it — don't make it required). `RewardMarkerLayer` draws **above
+  labels, below the start/end + connector bubbles**; its near-path `buffer` is
+  **relative** (`rewardBufferFactor × median placed-shop extent`; absolute
+  `rewardBuffer` overrides), resolved once at load like the zoom ceiling.
 - **Label font is screen-space `max(minFontSize·dpr, fontSize·√scale·dpr)`**,
   applied once to `ctx.font` then counter-scaled by `1/scale` — a `minFontSize·dpr`
   FLOOR with √scale growth above it. There is **no `_fitScale` unit-shrink** (the

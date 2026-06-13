@@ -20,7 +20,10 @@ floors, read shop labels, switch floors, search shops/facilities, focus a shop b
 search or polygon tap (Phase 1), **and route destination → destination over the
 navmesh** — shortest funnel path, cross-floor, with escalator/lift preference,
 step-free gating, animated polyline, start/end pins, and tap-to-switch floor
-bubbles (Phase 2). Kiosk/share is Phase 3.
+bubbles (Phase 2). A mid-stream **rewards-on-route** feature also landed
+out-of-phase: shops carrying an active reward that lie along the drawn route get a
+gold seal-percent marker whose tap emits a `reward-tap` event for the host's deal
+UI. Kiosk/share is Phase 3.
 
 ## Capabilities
 
@@ -41,6 +44,11 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `route-rendering` `(ui)` | `NavigationLayer` animated per-floor polyline (grey full + black progress); re-slices on floor switch; engine frames start anchor | `capabilities/route-rendering.md` |
 | `route-markers` `(ui)` | `PinMarkerLayer` start/end pins + `NavMarkerLayer` floor-transition bubbles ("↑ Tap to L3") with `hitTest→levelCode` | `capabilities/route-markers.md` |
 | `search-to-route` `(ui)` | From/to search + connector toggles drive `navigateTo`; route/error in summary panel; public `element.navigateTo({from,to})` | `capabilities/search-to-route.md` |
+| `reward-data` | `rewards` rides the `datas_…` half through the split merge onto `BundleModel` (verbatim array + `rewardsByShopId` index), as an **optional/unvalidated** key (fixtures lack it) | `capabilities/reward-data.md` |
+| `reward-catalog` | `RewardStore` surfaces only **currently-active** rewards (both `deals`+`rewards` types) for a placed shop; injectable `now`; hydrates from the model + catalog, never fetches | `capabilities/reward-catalog.md` |
+| `reward-route-matching` | Pure `rewardRouteMatch()` selects reward-shops within a near-path `buffer` of the route polyline (route-gated, start/end suppressed, one per shop); `deriveRewardBuffer()` derives the relative buffer | `capabilities/reward-route-matching.md` |
+| `reward-markers` `(ui)` | `RewardMarkerLayer` draws a gold seal + caption pill (`"N offers"` for ≥2) as an offset-above speech bubble at each matched shop on the active floor, above labels / below pin+nav markers | `capabilities/reward-markers.md` |
+| `reward-tap` | Tapping a seal → self-describing `{type:'reward'}` hit → single `tap:reward` → `reward-tap` `CustomEvent` `{shopId, rewards, location}`; demo logs it | `capabilities/reward-tap.md` |
 
 ## Constraints
 
@@ -84,6 +92,10 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
   rendering`, `route-markers`, `search-to-route`): chrome-devtools-mcp was locked
   during the run, so each was QA'd **code-only** against the real layer + engine
   stack. Run `/tars:review --ui` once the browser tool is free.
+- **Live-browser smoke owed for the `reward-markers` offset-bubble refinement**
+  (seal-before-label inline row + offset-above bubble): criteria 1–4 got real
+  browser QA, but the redesign (criteria 5–7) was QA'd **code-only** because
+  chrome-devtools-mcp could not attach. Joins the `/tars:review --ui` list above.
 - **Phase 3 (Kiosk & share)** not started — `kiosk-here`, `deep-link-state`,
   `qr-share`, `brand-theming`. **You-are-here as a route start** is deferred here
   (Phase-2 routing is destination → destination only).
@@ -96,13 +108,13 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 
 | Directory | Responsibility | Key entry point |
 |-----------|----------------|-----------------|
-| `src/data/` | Bundle load + index; destination catalog; geometry store; style cascade | `BundleLoader.js`, `LocationModel.js`, `MapGeometryModel.js`, `StyleResolver.js` |
+| `src/data/` | Bundle load + index; destination catalog; geometry store; style cascade; active-reward catalog | `BundleLoader.js`, `LocationModel.js`, `MapGeometryModel.js`, `StyleResolver.js`, `RewardStore.js` |
 | `src/core/` | Engine orchestration (init/dispose/floor/focus), config, event bus, fit-derived zoom bounds | `MapEngine.js`, `zoomBounds.js` |
-| `src/layers/` | Canvas layers: floor polygons, labels, route polyline, pins, transition bubbles | `FloorLayer.js`, `LocationLayer.js`, `NavigationLayer.js`, `PinMarkerLayer.js`, `NavMarkerLayer.js` |
+| `src/layers/` | Canvas layers: floor polygons, labels, route polyline, pins, transition bubbles, reward seals | `FloorLayer.js`, `LocationLayer.js`, `NavigationLayer.js`, `PinMarkerLayer.js`, `NavMarkerLayer.js`, `RewardMarkerLayer.js` |
 | `src/renderer/` | Render loop, transform pipeline, layer stack, rbush overlap | `Renderer.js`, `RectVisibility.js` |
 | `src/interaction/` | Gesture recognition + hit-test classification | `HitTestManager.js` |
 | `src/component/` | `<wayfinder-map>` Web Component + built-in UI controls | `WayfinderMap.js` |
-| `src/navigation/` | Navmesh routing: triangle-A*, funnel string-pull, graph builder, route planner + state | `NavGraph.js`, `TriangleAStar.js`, `FunnelPath.js`, `PathFinder.js`, `RouteManager.js` |
+| `src/navigation/` | Navmesh routing: triangle-A*, funnel string-pull, graph builder, route planner + state; reward near-path matcher | `NavGraph.js`, `TriangleAStar.js`, `FunnelPath.js`, `PathFinder.js`, `RouteManager.js`, `RewardRouteMatch.js` |
 | `test/` | Vitest node-env suite + `fixtures/SGC_v001.json` real bundle | per-capability `*.test.js` |
 | `demo/` | Static showcase pages for the Phase-1 browse capabilities (bare / default-controls / javascript-api / level-selector-only / `focus-shop-id` / theme) + per-demo guide | `index.html` |
 | `.dev/` | Zero-dep ownership-aware dev-server harness (human vs agent owner, live-reload, `$PORT`/config) | `server.mjs`, `ensure.mjs`, `stop.mjs` |
@@ -176,6 +188,8 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
 | `funnelPath(triPath, mesh, start, end)` | `src/navigation/FunnelPath.js` | string-pull a triangle corridor → shortest `[x,y][]` |
 | `sortFloorCodesByPosition(codes, levels)` | `src/component/controls/levelOrder.js` | order floors by `Level.position` |
 | `computeEnvelope(boundsList)` | `src/core/zoomBounds.js` | cross-floor per-axis-max box (largest fitted view) for the relative max-zoom ceiling |
+| `rewardRouteMatch(route, locationStore, rewardStore, buffer)` | `src/navigation/RewardRouteMatch.js` | pure near-path reward-shop selection (route-gated, endpoint-suppressed, deduped) |
+| `deriveRewardBuffer(locationStore, opts)` | `src/navigation/RewardRouteMatch.js` | relative near-path buffer = `factor × median placed-shop extent` (absolute override / envelope fallback) |
 
 ## Integration seams
 
@@ -187,7 +201,10 @@ bubbles (Phase 2). Kiosk/share is Phase 3.
    and drive its active level via `setFloor`.
 3. **Adding a tap behavior:** `FloorLayer.hitTest` returns a `unitId`;
    `HitTestManager.#classifyHit` maps it via `getLocationsByUnitId` to
-   `tap:location` / `tap:disambiguate` / `tap:floor`.
+   `tap:location` / `tap:disambiguate` / `tap:floor`. A **self-describing** layer
+   hit (`{type:'floor-transition'|'reward', …}`) instead short-circuits *before*
+   the unit-id path and carries its own clean `payload`, emitted verbatim by the
+   single `#onTap` emit (no handler re-emit).
 4. **Exposing an engine event to the host page:** add a bus→DOM entry in
    `WayfinderMap.#wireEvents`.
 5. **Building the routing graph:** `MapEngine.#createNavigationSystem` is the

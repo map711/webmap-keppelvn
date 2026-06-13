@@ -513,3 +513,158 @@ describe2('split-data-loading: BundleLoader.load({mapsUrl, datasUrl})', () => {
   });
 });
 // <<< TARS cap:split-data-loading
+
+// >>> TARS cap:reward-data
+//
+// reward-data (Reward data passthrough) — the `datas_…` half MAY carry a
+// `rewards: [{id, shops:[...], ...}]` list. The loader must carry it across the
+// `#loadSplit` merge so the resolved `BundleModel` exposes:
+//   - `model.rewards` — the input `datas.rewards` array, verbatim (deep-equal).
+//   - `model.rewardsByShopId` — a shopId -> [rewards…] index that mirrors
+//     `shopsById`: a reward listing N shops is indexed under EVERY one of its
+//     `shops[]`, so `.get(shopId)` returns the rewards that touch that shop.
+//
+// `rewards` is OPTIONAL: a datas half with no `rewards` key must still validate
+// and resolve (rewards -> [], index empty). The split validation must NOT add
+// `rewards` to the datas half's required keys.
+//
+// The merged on-disk SGC fixture carries NO `rewards`, so these tests SYNTHESIZE
+// the rewards onto a sliced datas half (via splitFixture) — the contract is the
+// passthrough+index, asserted against hand-built reward records, never raw data.
+//
+// Targets (one per acceptance criterion):
+//   1. datas.rewards present -> model.rewards deep-equals datas.rewards.
+//   2. a multi-shop reward is indexed under EACH of its shops[] ids.
+//   3. a shop id with no reward -> undefined/empty from rewardsByShopId.
+//   4. datas half with NO rewards key -> resolves (no BundleLoadError);
+//      rewards === [] and rewardsByShopId empty.
+//   5. the split validation does NOT require `rewards`: a datas half missing
+//      rewards but carrying shops+categories still validates.
+import { describe as describe3, it as it3, expect as expect3, beforeEach as beforeEach3, afterEach as afterEach3, vi as vi3 } from 'vitest';
+
+// Resolve "rewards for a shop id" across the index shapes the model might expose
+// (Map<shopId, reward[]> or a plain object), normalizing to a reward[] (or
+// undefined when the shop has none). The criterion's contract is `.get(shopId)`.
+function rewardsForShopId(model, shopId) {
+  const index = model.rewardsByShopId;
+  if (index == null) return undefined;
+  if (typeof index.get === 'function') return index.get(shopId);
+  return index[shopId];
+}
+
+describe3('reward-data: BundleModel rewards passthrough + shop index', () => {
+  let loader;
+
+  beforeEach3(async () => {
+    loader = await makeLoader();
+  });
+
+  afterEach3(() => {
+    vi3.restoreAllMocks();
+  });
+
+  // The reward fixture: one reward (id 9) spanning two shops, one single-shop
+  // reward (id 12) so per-shop isolation is observable. Shop ids 3 / 477 / 50
+  // are chosen NOT to collide with each other's lists.
+  const REWARDS = [
+    { id: 9, name: 'Double Points', type: 'points', shops: [3, 477] },
+    { id: 12, name: 'Free Coffee', type: 'voucher', shops: [50] }
+  ];
+
+  function splitWithRewards(rewards = REWARDS) {
+    const { maps, datas } = splitFixture();
+    datas.rewards = rewards;
+    return { maps, datas };
+  }
+
+  // ---- Criterion 1: model.rewards deep-equals the input datas.rewards ----
+  it3('carries datas.rewards across the merge so model.rewards deep-equals the input', async () => {
+    installSplitFetch(splitWithRewards());
+    const model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+
+    expect3(Array.isArray(model.rewards), 'model.rewards must be an array').toBe(true);
+    expect3(model.rewards).toEqual(REWARDS);
+    // The reward id 9 with its two shops survives verbatim (the criterion's witness).
+    const r9 = model.rewards.find((r) => r.id === 9);
+    expect3(r9, 'reward id 9 must survive the merge').toBeTruthy();
+    expect3(r9.shops).toEqual([3, 477]);
+  });
+
+  // ---- Criterion 2: a multi-shop reward is indexed under EACH of its shops[] ----
+  it3('indexes a multi-shop reward under every one of its shops[] (rewardsByShopId.get(3) and .get(477) both include 9)', async () => {
+    installSplitFetch(splitWithRewards());
+    const model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+
+    const forShop3 = rewardsForShopId(model, 3);
+    const forShop477 = rewardsForShopId(model, 477);
+
+    expect3(Array.isArray(forShop3), 'rewardsByShopId.get(3) must be an array of rewards').toBe(true);
+    expect3(Array.isArray(forShop477), 'rewardsByShopId.get(477) must be an array of rewards').toBe(true);
+    expect3(forShop3.map((r) => r.id)).toContain(9);
+    expect3(forShop477.map((r) => r.id)).toContain(9);
+
+    // The single-shop reward (id 12 / shop 50) is NOT indexed under shop 3 or 477.
+    expect3(forShop3.map((r) => r.id)).not.toContain(12);
+    expect3(forShop477.map((r) => r.id)).not.toContain(12);
+    const forShop50 = rewardsForShopId(model, 50);
+    expect3(Array.isArray(forShop50)).toBe(true);
+    expect3(forShop50.map((r) => r.id)).toEqual([12]);
+  });
+
+  // ---- Criterion 3: a shop id with no reward -> undefined / empty ----
+  it3('returns undefined or an empty list for a shop id that no reward lists', async () => {
+    installSplitFetch(splitWithRewards());
+    const model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+
+    // 999999 is not in any reward's shops[].
+    const none = rewardsForShopId(model, 999999);
+    const isEmpty = none === undefined || (Array.isArray(none) && none.length === 0);
+    expect3(isEmpty, 'a shop with no reward must yield undefined or an empty array').toBe(true);
+  });
+
+  // ---- Criterion 4: datas half with NO rewards key still resolves; rewards [] / index empty ----
+  it3('resolves a datas half WITH NO rewards key (no BundleLoadError); rewards is [] and the index is empty', async () => {
+    const { maps, datas } = splitFixture();
+    expect3(
+      Object.prototype.hasOwnProperty.call(datas, 'rewards'),
+      'the sliced fixture datas half must carry no rewards key (precondition)'
+    ).toBe(false);
+
+    installSplitFetch({ maps, datas });
+
+    let caught;
+    let model;
+    try {
+      model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect3(caught, 'a datas half with no rewards must NOT raise a BundleLoadError').toBeUndefined();
+    expect3(Array.isArray(model.rewards), 'model.rewards must default to an array').toBe(true);
+    expect3(model.rewards).toEqual([]);
+
+    // The index is empty: any shop id resolves to nothing.
+    const someShopId = datas.shops[0].id;
+    const got = rewardsForShopId(model, someShopId);
+    const empty = got === undefined || (Array.isArray(got) && got.length === 0);
+    expect3(empty, 'with no rewards, rewardsByShopId must resolve nothing for any shop').toBe(true);
+  });
+
+  // ---- Criterion 5: split validation does NOT require `rewards` ----
+  it3('validates a datas half that has shops+categories but no rewards (rewards is not a required key)', async () => {
+    const { maps, datas } = splitFixture();
+    // Precondition: the datas half carries shops + categories, but no rewards.
+    expect3(Array.isArray(datas.shops)).toBe(true);
+    expect3(Array.isArray(datas.categories)).toBe(true);
+    expect3(Object.prototype.hasOwnProperty.call(datas, 'rewards')).toBe(false);
+
+    installSplitFetch({ maps, datas });
+
+    // Must resolve (validation passes) rather than reject for a missing `rewards`.
+    const model = await loader.load({ mapsUrl: MAPS_URL, datasUrl: DATAS_URL });
+    expect3(model.shops.length).toBe(20);
+    expect3(model.categories.length).toBe(10);
+  });
+});
+// <<< TARS cap:reward-data

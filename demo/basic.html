@@ -26,6 +26,11 @@
     map.addEventListener("error", (event) => {
       console.error("Map error:", event.detail?.error || event);
     });
+
+    // Manual test hook: log a tapped reward-shop's offers.
+    map.addEventListener("reward-tap", (event) => {
+      console.log("Reward tap:", event.detail);
+    });
   </script>
 </body>
 </html>
