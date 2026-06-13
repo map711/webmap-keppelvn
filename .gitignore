@@ -20,3 +20,6 @@ datas/*.gz
 # Dev-harness runtime state (per-machine; not source)
 .dev/dev.json
 .dev/agent-server.log
+
+# Brainstorming visual companion
+.superpowers/
