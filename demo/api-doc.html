@@ -203,6 +203,7 @@ map.addEventListener("floor-changed", (e) =&gt; console.log("floor", e.detail));
               <tr><td class="px-4 py-3"><code class="text-sky-300">route-mode-changed</code></td><td class="px-4 py-3"><code>{ mode }</code> &mdash; <code>'escalator'</code> / <code>'lift'</code>.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">location-tap</code></td><td class="px-4 py-3"><code>{ location, node, floor }</code> &mdash; a unit was tapped/focused.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">floor-transition-tap</code></td><td class="px-4 py-3"><code>{ transitionId, fromFloor, toFloor }</code> &mdash; a connector bubble was tapped.</td></tr>
+              <tr><td class="px-4 py-3"><code class="text-sky-300">reward-tap</code></td><td class="px-4 py-3"><code>{ shopId, rewards, location }</code> &mdash; a reward seal on the route was tapped. Fires once per tap.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">floor-tap</code></td><td class="px-4 py-3"><code>{ floor, x, y }</code> &mdash; empty floor area.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">location-disambiguate</code></td><td class="px-4 py-3"><code>{ locations, x, y }</code> &mdash; a multi-tenant unit needs a choice.</td></tr>
               <tr><td class="px-4 py-3"><code class="text-sky-300">empty-tap</code></td><td class="px-4 py-3"><code>{ x, y }</code> &mdash; empty map area.</td></tr>
