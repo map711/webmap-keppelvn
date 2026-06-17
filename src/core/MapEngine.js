@@ -747,6 +747,24 @@ export class MapEngine {
   }
 
   /**
+   * Get the live scale bounds {min, max} from the transform pipeline. Returns a
+   * safe finite default when called before the renderer/transform is available,
+   * so callers (e.g. the zoom control's disabled-state check) never throw.
+   * @returns {{min:number,max:number}}
+   */
+  getScaleBounds() {
+    const bounds = this.#renderer?.transform?.getScaleBounds?.();
+    if (
+      bounds &&
+      Number.isFinite(bounds.min) &&
+      Number.isFinite(bounds.max)
+    ) {
+      return { min: bounds.min, max: bounds.max };
+    }
+    return { min: 1, max: 1 };
+  }
+
+  /**
    * Set view state directly.
    * @param {Object} state
    */

@@ -33,6 +33,14 @@ const ICON_ATTR_TO_KEY = Object.freeze({
   'icon-escalator': 'escalator'
 });
 
+// Zoom control factors (criteria pin these exactly): the +/- buttons multiply the
+// current scale by 1.4 / its inverse. The epsilon decides when the live scale is
+// "at" a bound (so the matching button is disabled) — wide enough that a
+// sub-epsilon undershoot of the ceiling still counts as at-max.
+const ZOOM_IN_FACTOR = 1.4;
+const ZOOM_OUT_FACTOR = 1 / 1.4;
+const ZOOM_DISABLED_EPSILON = 1e-3;
+
 const DATA_IMAGE_ICON_PATTERN = /^data:image\//i;
 const HTTP_ICON_PATTERN = /^https?:\/\//i;
 const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
@@ -100,6 +108,7 @@ class WayfinderMapElement extends HTMLElement {
       'enable-rotation',
       'disable-rotation',
       'level-selector',
+      'zoom-control',
       'search-control',
       'icon-walk',
       'icon-stand',
@@ -121,6 +130,13 @@ class WayfinderMapElement extends HTMLElement {
   #levelSelectorUnsubFloor = null;
   #levelSelectorUnsubData = null;
   #controlRailEl = null;
+  #railColumnEl = null;
+  #zoomControlsEl = null;
+  #zoomInButton = null;
+  #zoomOutButton = null;
+  #zoomControlEnabled = false;
+  #zoomClickHandler = null;
+  #zoomUnsubViewChanged = null;
   #locateControlsEl = null;
   #locateHereButton = null;
   #locateStartButton = null;
@@ -314,6 +330,9 @@ class WayfinderMapElement extends HTMLElement {
       case 'level-selector':
         this.#syncLevelSelector();
         break;
+      case 'zoom-control':
+        this.#syncZoomControl();
+        break;
       case 'search-control':
         this.#syncSearchControl();
         break;
@@ -393,6 +412,7 @@ class WayfinderMapElement extends HTMLElement {
       this.#bindLocateControls();
       this.#setMapMode('browse');
       this.#syncLevelSelector();
+      this.#syncZoomControl();
       this.#syncSearchControl();
       this.#applyMarkerStyleFromAttributes();
       this.#applyInitialFocusNode();
@@ -524,6 +544,21 @@ class WayfinderMapElement extends HTMLElement {
     this.#levelSelectorEl.setAttribute('role', 'group');
     this.#levelSelectorEl.setAttribute('aria-label', 'Level selector');
 
+    // Zoom controls live in a right-column wrapper as a SIBLING positioned AFTER
+    // the level-selector, so the +/- buttons stay pinned and do not scroll with
+    // the floor list. Empty (data-enabled=false) until the zoom-control attribute
+    // and an initialized engine turn it on.
+    this.#zoomControlsEl = document.createElement('div');
+    this.#zoomControlsEl.className = 'wayfinder-zoom-controls';
+    this.#zoomControlsEl.dataset.enabled = 'false';
+    this.#zoomControlsEl.setAttribute('role', 'group');
+    this.#zoomControlsEl.setAttribute('aria-label', 'Zoom controls');
+
+    this.#railColumnEl = document.createElement('div');
+    this.#railColumnEl.className = 'wayfinder-rail-column';
+    this.#railColumnEl.appendChild(this.#levelSelectorEl);
+    this.#railColumnEl.appendChild(this.#zoomControlsEl);
+
     this.#locateControlsEl = document.createElement('div');
     this.#locateControlsEl.className = 'wayfinder-locate-controls';
     this.#locateControlsEl.dataset.mode = 'browse';
@@ -601,7 +636,7 @@ class WayfinderMapElement extends HTMLElement {
     this.#controlRailEl = document.createElement('div');
     this.#controlRailEl.className = 'wayfinder-control-rail';
     this.#controlRailEl.appendChild(this.#locateControlsEl);
-    this.#controlRailEl.appendChild(this.#levelSelectorEl);
+    this.#controlRailEl.appendChild(this.#railColumnEl);
     container.appendChild(this.#controlRailEl);
 
     this.#searchContainerEl = document.createElement('div');
@@ -1623,6 +1658,7 @@ class WayfinderMapElement extends HTMLElement {
 
   #cleanup() {
     this.#disableLevelSelector();
+    this.#disableZoomControl();
     this.#disableSearchControl();
     this.#unbindLocateControls();
     this.#cleanupViewportInsetTracking();
@@ -1755,6 +1791,120 @@ class WayfinderMapElement extends HTMLElement {
       // of the refit, matching the connector-pin and navigation/focus pan paths.
       this.#engine.setFloor(floorCode, { fitToBounds: false });
     }
+  }
+
+  #syncZoomControl() {
+    if (this.hasAttribute('zoom-control')) {
+      this.#enableZoomControl();
+    } else {
+      this.#disableZoomControl();
+    }
+  }
+
+  #enableZoomControl() {
+    this.#zoomControlEnabled = true;
+    if (this.#engine?.isInitialized) {
+      this.#renderZoomControls();
+      this.#bindZoomControlEvents();
+      this.#updateZoomControlDisabled();
+    } else if (this.#zoomControlsEl) {
+      this.#zoomControlsEl.dataset.enabled = 'false';
+    }
+  }
+
+  #disableZoomControl() {
+    this.#zoomControlEnabled = false;
+    this.#unbindZoomControlEvents();
+    this.#zoomInButton = null;
+    this.#zoomOutButton = null;
+    if (this.#zoomControlsEl) {
+      this.#zoomControlsEl.dataset.enabled = 'false';
+      this.#zoomControlsEl.innerHTML = '';
+    }
+  }
+
+  #renderZoomControls() {
+    if (!this.#zoomControlEnabled || !this.#engine || !this.#zoomControlsEl) return;
+
+    this.#zoomControlsEl.innerHTML = '';
+
+    this.#zoomInButton = document.createElement('button');
+    this.#zoomInButton.type = 'button';
+    this.#zoomInButton.className = 'wayfinder-zoom-button wayfinder-zoom-button--in';
+    this.#zoomInButton.dataset.zoom = 'in';
+    this.#zoomInButton.setAttribute('aria-label', 'Zoom in');
+    this.#zoomInButton.textContent = '+';
+    this.#zoomControlsEl.appendChild(this.#zoomInButton);
+
+    this.#zoomOutButton = document.createElement('button');
+    this.#zoomOutButton.type = 'button';
+    this.#zoomOutButton.className = 'wayfinder-zoom-button wayfinder-zoom-button--out';
+    this.#zoomOutButton.dataset.zoom = 'out';
+    this.#zoomOutButton.setAttribute('aria-label', 'Zoom out');
+    this.#zoomOutButton.textContent = '−';
+    this.#zoomControlsEl.appendChild(this.#zoomOutButton);
+
+    this.#zoomControlsEl.dataset.enabled = 'true';
+  }
+
+  #bindZoomControlEvents() {
+    if (!this.#engine || !this.#zoomControlsEl) return;
+
+    if (!this.#zoomClickHandler) {
+      this.#zoomClickHandler = (event) => this.#handleZoomControlClick(event);
+      this.#zoomControlsEl.addEventListener('click', this.#zoomClickHandler);
+    }
+
+    if (!this.#zoomUnsubViewChanged) {
+      this.#zoomUnsubViewChanged = this.#engine.on('view:changed', () => {
+        this.#updateZoomControlDisabled();
+      });
+    }
+  }
+
+  #unbindZoomControlEvents() {
+    if (this.#zoomClickHandler && this.#zoomControlsEl) {
+      this.#zoomControlsEl.removeEventListener('click', this.#zoomClickHandler);
+      this.#zoomClickHandler = null;
+    }
+    if (this.#zoomUnsubViewChanged) {
+      this.#zoomUnsubViewChanged();
+      this.#zoomUnsubViewChanged = null;
+    }
+  }
+
+  #handleZoomControlClick(event) {
+    if (!this.#engine) return;
+    const target = event.target;
+    const button = target?.closest?.('button');
+    if (!button || !this.#zoomControlsEl?.contains(button)) return;
+    if (button.hasAttribute('disabled')) return;
+
+    const direction = button.dataset.zoom;
+    if (direction === 'in') {
+      this.#engine.zoom(ZOOM_IN_FACTOR);
+    } else if (direction === 'out') {
+      this.#engine.zoom(ZOOM_OUT_FACTOR);
+    }
+  }
+
+  #updateZoomControlDisabled() {
+    if (!this.#zoomControlEnabled || !this.#engine || !this.#zoomInButton || !this.#zoomOutButton) {
+      return;
+    }
+
+    const { scale } = this.#engine.getViewState?.() ?? { scale: 1 };
+    const bounds = this.#engine.getScaleBounds?.() ?? { min: 1, max: 1 };
+    const { min, max } = bounds;
+
+    const atMax = Number.isFinite(max) && scale >= max - ZOOM_DISABLED_EPSILON;
+    const atMin = Number.isFinite(min) && scale <= min + ZOOM_DISABLED_EPSILON;
+
+    if (atMax) this.#zoomInButton.setAttribute('disabled', '');
+    else this.#zoomInButton.removeAttribute('disabled');
+
+    if (atMin) this.#zoomOutButton.setAttribute('disabled', '');
+    else this.#zoomOutButton.removeAttribute('disabled');
   }
 
   #syncSearchControl() {

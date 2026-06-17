@@ -182,6 +182,67 @@ export const styles = `
     outline-offset: 2px;
   }
 
+  /* Right column: the scrollable level-selector stacked above the fixed-size
+     zoom controls. The zoom group is a SIBLING after the level-selector so it
+     stays pinned and does not scroll with the floor list. */
+  .wayfinder-rail-column {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 100%;
+    min-height: 0;
+    align-items: flex-end;
+  }
+
+  /* Let the floor list shrink/scroll so the pinned zoom controls keep their
+     room; the zoom controls never shrink. */
+  .wayfinder-rail-column .wayfinder-level-selector {
+    flex: 0 1 auto;
+    min-height: 0;
+  }
+
+  .wayfinder-zoom-controls {
+    display: none;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px;
+    /* Extra separation above the level selector so the zoom group reads as a
+       distinct cluster (inter-group gap > the 8px intra-rail gap). */
+    margin-top: 8px;
+  }
+
+  .wayfinder-zoom-controls[data-enabled='true'] {
+    display: flex;
+  }
+
+  .wayfinder-zoom-button {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 12px;
+    border: 1px solid rgba(15, 23, 42, 0.2);
+    background: var(--wayfinder-control-button-bg);
+    color: #0f172a;
+    font: 600 22px/1 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer;
+    box-shadow: 0 6px 18px -12px rgba(15, 23, 42, 0.5);
+    display: grid;
+    place-items: center;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+
+  .wayfinder-zoom-button:focus-visible {
+    outline: 2px solid rgba(14, 116, 144, 0.7);
+    outline-offset: 2px;
+  }
+
+  .wayfinder-zoom-button[disabled] {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
   .wayfinder-search {
     position: absolute;
     inset: 0;

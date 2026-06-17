@@ -36,6 +36,7 @@ UI. Kiosk/share is Phase 3.
 | `map-labels` `(ui)` | `LocationLayer` draws labelable-unit labels at `label_point`/`label_rotation`, zoom-responsive screen-space font (`max(minFontSize·dpr, fontSize·√scale·dpr)`) + cached overlap suppression with zoom-freeze/idle-recompute | `capabilities/map-labels.md` |
 | `floor-switching` `(ui)` | Level selector + `setFloor` swap geometry+labels and refit; `floor:changed` event; empty L1 + sparse B2/B1 | `capabilities/floor-switching.md` |
 | `zoom-bounds` | One global zoom-in ceiling = `maxZoomFactor × the largest floor's fit scale` (cross-floor envelope), re-derived on every refit; absolute `maxZoom` still overrides; animated focus clamps to live bounds | `capabilities/zoom-bounds.md` |
+| `zoom-control` `(ui)` | Opt-in `zoom-control` attribute renders `+`/`−` buttons below the level selector (sibling after it, pinned) that drive `engine.zoom(1.4 / 1÷1.4)` and disable at the live scale limits via `view:changed` + `getScaleBounds()` | `capabilities/zoom-control.md` |
 | `destination-search` `(ui)` | Built-in search filters the catalog by title/tokens; results dropdown + info card | `capabilities/destination-search.md` |
 | `destination-focus` `(ui)` | `focusLocation` / polygon tap: switch floor + zoom + end pin; multi-tenant disambiguation; clear → browse | `capabilities/destination-focus.md` |
 | `navmesh-routing` | Triangle-A* + funnel string-pull over `navmesh_by_level`, cross-floor via `transitions`; per-floor polyline `segments` (no fake `Node[]`) | `capabilities/navmesh-routing.md` |
@@ -96,6 +97,9 @@ UI. Kiosk/share is Phase 3.
   (seal-before-label inline row + offset-above bubble): criteria 1–4 got real
   browser QA, but the redesign (criteria 5–7) was QA'd **code-only** because
   chrome-devtools-mcp could not attach. Joins the `/tars:review --ui` list above.
+- **Live-browser smoke owed for `zoom-control`** (`(ui)`): the +/- buttons were
+  QA'd **code-only** against the real `TransformPipeline` (chrome-devtools-mcp
+  profile lock during the run). Joins the `/tars:review --ui` list above.
 - **Phase 3 (Kiosk & share)** not started — `kiosk-here`, `deep-link-state`,
   `qr-share`, `brand-theming`. **You-are-here as a route start** is deferred here
   (Phase-2 routing is destination → destination only).
