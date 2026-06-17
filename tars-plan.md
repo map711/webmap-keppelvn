@@ -1,150 +1,129 @@
-# Plan — Rewards-on-route markers
+# Plan — Zoom controls (+/- buttons)
 
-> **Mode:** standard (auto) — a new render layer + store + bundle data-passthrough + tap event spanning `BundleLoader`, `LocationModel`, the layer stack, `HitTestManager`, `MapEngine`, and the web component; one cohesive cycle with a `(ui)` marker capability.
-
-<!-- Mid-epic feature insert. NOT one of the epic's predicted Phase-3 capabilities
-(kiosk-here / deep-link-state / qr-share / brand-theming); it is a standalone cycle that
-INHERITS the epic's cross-cutting decisions (split maps_/datas_ bundle behind the BundleModel
-firewall; per-floor route `segments`; Canvas-2D layer/store architecture; synthetic-mini-bundle
-testing; port 5010). At /tars:cleanup decide whether to record it as new capabilities under the
-epic or as its own feature — do not re-litigate the inherited decisions here. -->
+> **Mode:** quick (auto) — one localized `(ui)` control added to the existing control rail via the established level-selector pattern; design already settled in the approved spec (`docs/superpowers/specs/2026-06-17-zoom-controls-design.md`).
 
 ## What & why            (PM ↔ client)
 
-- **Intent:** When a route is drawn, shops that carry an active reward **and** lie
-  along the route get a gold **seal-percent** pin (seal glyph + a small label pill).
-  This surfaces deals/offers in the user's path of travel — e.g. on the
-  ABC Mart → ALDO route, **B-Store** (which carries the mall-wide voucher) shows a
-  seal. Tapping a seal emits a `reward-tap` event carrying the reward records so the
-  host app renders its own deal UI.
-- **Constraints:**
-  - **Rewards ride inside the existing `datas` half** (`datas.rewards[]`) — **no new
-    URL, no new component attribute.** The `BundleModel` firewall and everything
-    downstream stay byte-shape-identical except the added `rewards` field.
-  - **Existing fixtures must keep loading (loader robustness, *not* product back-compat):**
-    none of the test fixtures carry `rewards` — the pinned Phase-1 fixture, the synthetic
-    mini-bundle, and the self-contained `load(string)` shape all lack it, and ~14 test
-    files load them. So `rewards` stays **optional** (defaults to `[]`, **not** a
-    required/validated key) purely so the existing suite and the `BundleModel` firewall
-    don't break. Making it required buys nothing (production `datas` always carries
-    `rewards`) and would force editing the frozen fixture — explicitly out of scope.
-  - **Tests stay offline** — fetch mocked, fixtures from disk, no port bound. Assert
-    data-driven *rules*; concrete counts live only in the synthetic mini-bundle (the
-    pinned fixture's asserted counts must not change).
-  - Markers must not compete with existing chrome: drawn **beneath** START/END
-    speech-bubbles and floor-transition bubbles, **above** unit labels.
+- **Intent:** Give visitors discrete on-screen zoom controls — a `+` and a `−`
+  button — alongside the floor switcher, for devices/contexts without easy pinch
+  or wheel zoom (kiosks, mouse-less touch, accessibility). The buttons sit below
+  the level selector with a slightly larger vertical gap between the two groups.
+- **Constraints:** Opt-in and independent of the existing level selector. Must
+  reuse the existing `engine.zoom(factor)` path (anchored at canvas center,
+  already clamped to the live scale bounds) — no new transform/zoom math. Must
+  not break the existing control-rail layout, the level selector's scroll
+  behavior, or the mobile `#updateLevelSelectorMaxHeight` path. Public
+  component/engine API stays additive.
 - **Decisions:**
-  - **Source = `datas.rewards[]` passthrough** — rejected: a separate `deals-url` /
-    component attribute (the data already lives in the `datas` half).
-  - **Naming = `reward(s)`** throughout (store/layer/event/icon) — the data array is
-    `rewards` and `type` may be `"deals"` *or* `"rewards"`.
-  - **Both reward `type`s qualify** (`"deals"` + `"rewards"`) — rejected: `"deals"`-only
-    (would drop B-Store, which only carries the mall-wide `"rewards"` voucher).
-  - **Active-window filter on** — only rewards with `start_date ≤ now ≤ end_date` pin;
-    `now` injectable for deterministic tests.
-  - **Match = near-path buffer, route-gated** — a reward-shop pins when its display
-    point is within a tunable buffer of the per-floor route polyline; **start/end shops
-    suppressed**; **one pin per shop**; no route → no pins. Rejected: "every deal on the
-    floor" (pins where you aren't walking); "endpoints only" (misses the path).
-  - **Tap = event only** — emit `reward-tap` (`{shopId, rewards, location}`); host owns
-    the deal UI. Rejected: a built-in callout (bakes deal-UI opinions into the component).
-  - **Marker = seal + small label pill** — pill shows the primary reward `title`
-    (truncated, small font) or `"N offers"` when a shop has ≥2 active rewards.
+  - **New `zoom-control` boolean attribute**, independent of `level-selector` —
+    rejected coupling to `level-selector` (less flexible) and always-on (nothing
+    to anchor "below" when the rail is otherwise empty).
+  - **Two separate 44×44 buttons** matching the existing rail buttons (text
+    glyphs `+` / `−`) — rejected a joined Google-Maps-style pill and custom SVG
+    icons (YAGNI; text matches the level buttons).
+  - **Disable + grey out at the zoom limit** (driven by `view:changed` +
+    `getScaleBounds()`) — rejected always-tappable no-op (weaker feedback).
+  - **Right-column wrapper** holding level-selector + zoom group — rejected
+    rendering the buttons inside the level-selector element (they'd scroll away
+    with a long floor list).
+  - **`ZOOM_STEP = 1.4` per tap** — rejected reusing the wheel's 1.1/tick (too
+    timid for a discrete tap).
 
 ## How                   (tech lead — grounded in the codebase)
 
 - **Module map:**
-  - `src/data/BundleLoader.js` — carry `rewards` across the `#loadSplit` merge
-    ([BundleLoader.js:231-241](src/data/BundleLoader.js#L231-L241)); `BundleModel`
-    gains `this.rewards` + derived `this.rewardsByShopId` (mirrors `shopsById`,
-    [BundleLoader.js:109-113](src/data/BundleLoader.js#L109-L113)).
-  - `src/data/RewardStore.js` *(new)* — hydrates from the model; active-window +
-    type-inclusive filter; `getRewardsByShopId(shopId)` (placed-shop aware via the
-    existing catalog).
-  - `src/navigation/` (or alongside the matcher) — a pure `rewardRouteMatch()` selecting
-    reward-shops near the route polylines (reuses per-floor `segments` + a small
-    point-to-segment distance helper).
-  - `src/layers/RewardMarkerLayer.js` *(new)* — screen-space seal+pill renderer + `hitTest`,
-    modeled on `PinMarkerLayer` (transform/icon cache) and `NavMarkerLayer` (hit-bubble
-    bookkeeping).
-  - `src/assets/icons.js` — add `ICON_SEAL_PERCENT`.
-  - `src/interaction/HitTestManager.js` — short-circuit `type === 'reward'` in
-    `#classifyHit` before unit-id extraction ([HitTestManager.js:93-98](src/interaction/HitTestManager.js#L93-L98)).
-  - `src/core/MapEngine.js` — instantiate + register the layer in `#createLayers`
-    (z-order above `LocationLayer`, below `PinMarkerLayer`/`NavMarkerLayer`); recompute the
-    selection on route set/clear and on `setFloor`; register the `reward` hit handler →
-    emit `tap:reward`.
-  - `src/component/WayfinderMap.js` — add `'tap:reward': 'reward-tap'` to the `eventMap`
-    ([WayfinderMap.js:1445-1460](src/component/WayfinderMap.js#L1445-L1460)).
-  - `demo/basic.html` — add a `reward-tap` listener that `console.log`s `e.detail` (the
-    built-in manual test hook).
-- **Patterns:** new store mirrors `LocationStore` (engine hydrates it from the parsed
-  model; the store never fetches). New layer mirrors `PinMarkerLayer`/`NavMarkerLayer`
-  (screen-space counter-scaled draw; self-describing `hitTest` result). Tap classification
-  mirrors the `floor-transition` short-circuit. Event surfacing mirrors the existing
-  `tap:* → *-tap` `eventMap` re-dispatch.
-- **Integration seams:** `BundleModel.rewards` (data in); `RewardStore` (active join);
-  `rewardRouteMatch()` (route + catalog + buffer → selection); `RewardMarkerLayer.setSelection`/
-  `setFloor` (render); `hitTest → {type:'reward'}` → `HitTestManager` → `tap:reward` →
-  `reward-tap` (out). Matcher reads a shop's placements via `LocationStore.getLocation('shop:'+id).displayNodes` and start/end suppression via `route.startLocation`/`route.endLocation` ids.
-- **Reuse:** `PinMarkerLayer` screen-space transform + icon cache/tint; `NavMarkerLayer`
-  hit bookkeeping; `shopsById`-style indexing; per-floor `segments`; `LocationStore` shop→displayNodes join; `EventBus`/`eventMap`.
-- **Cross-cutting tech-stack decisions:** inherited from `tars-epic.md` (Canvas-2D
-  renderer; split-bundle behind `BundleModel`; route `segments` shape; raw CMS coords with
-  `renderScale = 1`, so buffer + display points share one coordinate space; Vitest synthetic
-  mini-bundle). No new cross-cutting decision → **no design panel** (single clear design,
-  every piece follows an existing precedent).
+  - `src/component/WayfinderMap.js` — new `zoom-control` attribute + the
+    `#syncZoomControl`/`#enableZoomControl`/`#disableZoomControl` trio, the zoom
+    button elements, the right-column wrapper, click delegation, and the
+    `view:changed` → disabled-state subscription.
+  - `src/core/MapEngine.js` — a small public `getScaleBounds()` passthrough.
+  - `src/component/styles.js` — `.wayfinder-rail-column`, `.wayfinder-zoom-controls`,
+    `.wayfinder-zoom-button` (+ `[disabled]`), and the level-selector flex-shrink
+    tweak.
+  - `demo/basic.html` — add `zoom-control` so the control is exercised live.
+- **Patterns:** Mirror the **level-selector** control exactly — observed attribute
+  → `#sync*` → `#enable*/#disable*` gated on `engine.isInitialized`, a `data-enabled`
+  flag, delegated `click` listener, and `data:loaded` re-render/refresh. Reuse the
+  **bus event → component listener** seam for `view:changed` (engine already emits
+  it from `#emitViewChange`). Reuse the existing rail button visual tokens.
+- **Integration seams:** Drives the existing public `WayfinderMap.zoom(factor)` →
+  `MapEngine.zoom(factor)` → `TransformPipeline.zoom` (center-anchored, clamped).
+  The only new seam is `MapEngine.getScaleBounds()` exposing
+  `TransformPipeline.getScaleBounds()` so the component can compare current scale
+  against the live min/max for the disabled state.
+- **Reuse:** `engine.zoom`, `engine.getViewState`, `transform.getScaleBounds`,
+  the rail flex layout, the 44×44 button styling, the level-selector lifecycle
+  shape.
+- **Cross-cutting tech-stack decisions:** none new — additive attribute + one
+  passthrough method; no new dependency, store, layer, or build change.
 
 ## Capability breakdown
 
-- [x] `reward-data` — `rewards` survives the split-bundle merge into `BundleModel` (array + `rewardsByShopId` index), and is optional/back-compatible. · depends on: none
-- [x] `reward-catalog` — `RewardStore` surfaces only currently-active rewards (both types) for a placed shop. · depends on: `reward-data`
-- [x] `reward-route-matching` — pure matcher selects reward-shops within a buffer of the per-floor route, route-gated, start/end suppressed, one per shop. · depends on: `reward-catalog`
-- [x] `reward-markers` `(ui)` — `RewardMarkerLayer` draws a gold seal + small label pill at each matched shop on the active floor, at the correct z-order, recomputed on route/floor change. · depends on: `reward-route-matching`
-- [x] `reward-tap` — tapping a seal emits `tap:reward`/`reward-tap` with the reward payload; demo logs it. · depends on: `reward-markers`
+- [x] `zoom-control` `(ui)` — opt-in `+`/`−` zoom buttons below the level selector that drive `engine.zoom` and disable at the scale limits · depends on: none
 
 ## How to test           (the binding acceptance criteria)
 
-### `reward-data`
-- Loading the split halves where the `datas` half has `rewards: [{id:9, shops:[3,477], …}]` yields a `BundleModel` whose `rewards` array deep-equals the input `datas.rewards`.
-- `model.rewardsByShopId.get(3)` and `.get(477)` each include reward `9` (a reward listing multiple shops is indexed under every one of its `shops[]`).
-- A shop id with no reward returns `undefined`/empty from `rewardsByShopId`.
-- Loading a `datas` half **with no `rewards` key** succeeds (no `BundleLoadError`); the model's `rewards` is `[]` and `rewardsByShopId` is empty.
-- The split validation does **not** list `rewards` as required: a `datas` half missing `rewards` but carrying `shops`+`categories` still validates.
+### `zoom-control` `(ui)`
 
-### `reward-catalog`
-- With injected `now` inside `[start_date, end_date]`, `getRewardsByShopId(shopId)` returns that reward; with `now` after `end_date` (or before `start_date`), it is excluded.
-- A reward with `type:"deals"` and a reward with `type:"rewards"` are **both** returned when active (no type filtering).
-- A placed shop with two active rewards returns both (length 2); a placed shop with none returns `[]`.
-- A reward whose `shops[]` references an unplaced/unknown shop id does not throw and is simply not returned for any placed shop.
+Tested via the established harness: a real `WayfinderMapElement` mounted with a
+stub engine (carrying `on()`, `zoom()`, `getScaleBounds()`, `getViewState()`,
+`isInitialized`, `getFloors/getLevels/getCurrentFloor`) injected through the
+mocked `MapEngine` constructor, the same way `DestinationSearch.test.js` does.
 
-### `reward-route-matching`
-- Given a synthetic route with a per-floor polyline and a reward-shop whose display point is within `buffer` of that polyline, the shop is in the selection; a reward-shop whose display point is beyond `buffer` is excluded.
-- A reward-shop on a floor **not** present in `route.segments` is excluded; the same shop on a traversed floor near the line is included (`levelCode` carried on each selected entry).
-- The route's start shop and end shop are **excluded** from the selection even when they carry active rewards and sit within the buffer.
-- A shop with multiple display points near the line produces exactly **one** selection entry (deduped per shop), carrying that shop's active rewards.
-- An empty/absent route produces an empty selection.
-
-### `reward-markers` `(ui)`
-- In `MapEngine`'s layer stack, the `RewardMarkerLayer` index is **greater than** `LocationLayer`'s and **less than** both `PinMarkerLayer`'s and `NavMarkerLayer`'s.
-- After `navigateTo(start,end)` on a mini-bundle carrying rewards, the layer's selection reflects the matched shops on the active floor; after `setFloor` to another traversed floor the selection updates to that floor's matches; clearing the route empties it.
-- `renderWithContext` on a mock 2D context draws one seal icon (`ICON_SEAL_PERCENT`) per selected shop at that shop's projected display point.
-- The pill text drawn equals the primary reward's `title` truncated to the configured max length when the shop has one active reward, and `"<n> offers"` when it has `n ≥ 2`.
-- *(refinement — seal-before-label + START/END-style bubble that clears the shop label)* The seal-percent badge is drawn **inline before (left of)** the caption text: in the recording context the seal's `drawImage` horizontal centre is **less than** the caption's `fillText` x, and the two share roughly the same vertical band — the marker reads as one row (`⊛ <title>`), not a vertical seal-under-pill stack. (Fails today: the seal centres on the anchor at x≈0, the caption centres above it at x≈0 — same x, stacked.)
-- *(refinement)* The marker renders as a START/END-style speech bubble **offset above** the shop's display point: every drawn glyph of the marker (the seal `drawImage` **and** the caption `fillText`) sits at **negative** screen-space y in the anchor frame, so the display point (y≈0, where the shop label draws) is left **clear** — the marker no longer overlaps the shop label. The bubble carries a downward tail whose tip meets the display point (modelled on `PinMarkerLayer.#drawBubblePath`). (Fails today: the seal straddles y=0, covering the label.)
-- *(refinement — protect the tap pipeline)* The offset bubble stays tappable at the shop: after `renderWithContext`, `hitTest` at the shop's display point still returns `{type:'reward', shopId, …}` (the hit target reaches the tail tip at the display point), so the existing reward-tap pipeline (`test/interaction/RewardTap.test.js`) is unaffected.
-
-### `reward-tap`
-- `RewardMarkerLayer.hitTest(x,y)` over a drawn seal returns `{type:'reward', shopId, rewards:[…]}`; a point off any marker returns `null`.
-- A `reward`-typed hit short-circuits in `HitTestManager.#classifyHit` (no unit-id extraction) and causes the manager to emit `tap:reward` with `{shopId, rewards, location}` — and **not** `tap:location` or `tap:floor`.
-- `WayfinderMap`'s `eventMap` maps `tap:reward → reward-tap`: emitting `tap:reward` on the engine bus dispatches a `reward-tap` `CustomEvent` on the element whose `detail` deep-equals `{shopId, rewards, location}`.
-- `demo/basic.html` registers a `reward-tap` listener that calls `console.log` with the event detail (asserted by reading the demo file).
+- **Gating / presence:** With the `zoom-control` attribute set and the engine
+  initialized, the shadow DOM contains exactly two zoom buttons — one zoom-in
+  (`aria-label="Zoom in"`) and one zoom-out (`aria-label="Zoom out"`). Without the
+  attribute, the shadow DOM contains **no** zoom buttons.
+- **Zoom-in factor:** Clicking the zoom-in button calls `engine.zoom` exactly once
+  with a factor `> 1` (specifically `1.4`).
+- **Zoom-out factor:** Clicking the zoom-out button calls `engine.zoom` exactly
+  once with a factor `< 1` (specifically `1 / 1.4`).
+- **Disabled at max:** When `getScaleBounds()` reports `max` ≈ the current
+  `getViewState().scale` (within an epsilon) on a `view:changed` event, the
+  zoom-in button has the `disabled` attribute and the zoom-out button does not.
+- **Disabled at min:** Symmetrically, when current scale ≈ `min`, the zoom-out
+  button is `disabled` and the zoom-in button is not.
+- **Enabled mid-range:** When current scale is strictly between `min` and `max`,
+  neither button is `disabled`. The disabled state updates in response to
+  `view:changed` (a later mid-range event re-enables a previously disabled
+  button).
+- **Independence from level-selector:** Setting `zoom-control` without
+  `level-selector` renders the zoom buttons but no level buttons; setting both
+  renders both groups, with the zoom group as a sibling element **after** the
+  level-selector element (not a descendant of it, so it does not scroll with the
+  floor list).
+- **Engine passthrough:** `MapEngine.getScaleBounds()` returns the transform's
+  `{ min, max }` when initialized, and does not throw (returns a safe default)
+  when called before init.
+- **Teardown:** Removing the `zoom-control` attribute removes the zoom buttons /
+  marks the group disabled and unsubscribes the `view:changed` listener (no leak;
+  mirrors `#disableLevelSelector`).
 
 ## Design intent         (UI-facing `(ui)` capabilities only — guidance, not a gate)
 
-### `reward-markers`
-- **Layout & hierarchy:** a gold/amber **seal-percent** badge (Phosphor `seal-percent` style — scalloped seal with a white `%`) anchored at the shop's display point, with a small white rounded pill beside/above it carrying the reward title in a **small** font (one short truncated line) or `"N offers"` for multiples. The badge reads as a compact accent — clearly subordinate to the dark START/END speech-bubbles and the floor-transition bubbles (which draw on top), and sitting above the unit labels. **Empty/loading/error:** no route or no matches → nothing is drawn (no idle pins); `rewards` data absent → silently no pins, map otherwise unchanged.
-- **Interaction:** the seal + pill form one tap target; tapping fires `reward-tap`. No built-in popover — the host renders detail. Standard tap feedback only (touch-first; no hover dependency).
-- **Responsive:** screen-space and counter-scaled like the existing marker layers; a min-font floor keeps the pill legible when zoomed out, and the badge does not upscale unboundedly when zoomed in.
-- **Accessibility:** canvas-rendered, consistent with the existing markers (no DOM a11y surface added); the pill must keep legible contrast (amber border / dark text on white); the emitted event lets the host expose an accessible deal list outside the canvas.
-- **Reference:** reuse `PinMarkerLayer`'s screen-space transform + icon cache/tint and `NavMarkerLayer`'s hit bookkeeping; amber accent (≈ `#E8B423`) deliberately distinct from the dark START/END bubbles; add `ICON_SEAL_PERCENT` to `src/assets/icons.js` as an inline data-URI like the other icons.
+### `zoom-control`
+- **Layout & hierarchy:** Vertical group in the control rail's right column,
+  **below** the level selector. A `+` button above a `−` button, each a 44×44
+  rounded-square matching the level/locate buttons. Inter-group gap **~16px**
+  (double the 8px intra-rail gap) so the zoom group reads as distinct from the
+  floor switcher; 8px between the two zoom buttons. When `level-selector` is off,
+  the zoom group sits alone at the top of that column slot. No empty/loading/error
+  states (pure control).
+- **Interaction:** Tap `+` to zoom in, `−` to zoom out, centered on the canvas.
+  At a zoom limit the relevant button greys out (reduced opacity, `cursor:default`,
+  no hover/active affordance) and is non-interactive; it re-enables as soon as the
+  view leaves the limit. The level selector remains scrollable and the zoom group
+  stays pinned and visible below it regardless of floor count.
+- **Responsive:** Works at both breakpoints. On mobile (≤768px) the level
+  selector may be height-constrained (existing `#updateLevelSelectorMaxHeight`);
+  the zoom group must remain visible below the (shrinking, scrollable) selector —
+  achieved by making the selector a shrinking flex child and the zoom group
+  `flex: 0 0 auto`.
+- **Accessibility:** `role="group"` labelled "Zoom controls"; each button is a
+  real `<button>` with an `aria-label` ("Zoom in"/"Zoom out"), keyboard-focusable
+  with the same visible focus ring as the other rail buttons; `disabled` reflects
+  the limit state to assistive tech.
+- **Reference:** Reuse `.wayfinder-level-button` / `.wayfinder-locate-button`
+  visual tokens (size, radius, border, background, shadow, `:focus-visible`
+  outline) and the rail's existing flex layout. Aesthetic bar: indistinguishable
+  in weight/finish from the existing rail controls.
